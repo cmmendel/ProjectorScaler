@@ -40,8 +40,8 @@ la presentación; opcionalmente restaura Duplicar al detenerse. Esto cambia
 la topología de Windows y puede reorganizar temporalmente las ventanas.
 
 ESTADO / LIMITACIONES
-- El código 2.1 NO está compilado todavía ni probado en una sesión real de
-  Windows 10/11 ni con un proyector HDMI. El EXE 2.0 no incluye estos cambios.
+- El código 2.1 compila sin avisos (clang 22, -Wall -Wextra), pero NO está
+  probado en una sesión real de Windows 10/11 ni con un proyector HDMI.
 - Versión GDI de hasta 20 fps; no idónea para cine fluido, DRM ni juego.
 - No modifica el audio, no apaga ópticamente la luz del proyector.
 - El EXE no tiene firma de código; SmartScreen podría mostrar una advertencia.

@@ -1,0 +1,6 @@
+ProjectorScalerPortable.exe
+ProjectorScaler.ini
+build/*.dll
+build/*.lib
+build/*.obj
+build/*.exp
