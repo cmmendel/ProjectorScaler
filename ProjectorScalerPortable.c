@@ -507,7 +507,8 @@ static void stopOutput(void){
 }
 static void computeFrame(int* ox,int* oy,int* ow,int* oh){
     if(g_aspectIndex==ASPECT_FREE){
-        int l=g_free[0]*g_tw/FREE_UNIT,t=g_free[1]*g_th/FREE_UNIT,r=g_free[2]*g_tw/FREE_UNIT,b=g_free[3]*g_th/FREE_UNIT;
+        int l=(g_free[0]*g_tw+FREE_UNIT/2)/FREE_UNIT,t=(g_free[1]*g_th+FREE_UNIT/2)/FREE_UNIT;
+        int r=(g_free[2]*g_tw+FREE_UNIT/2)/FREE_UNIT,b=(g_free[3]*g_th+FREE_UNIT/2)/FREE_UNIT;
         *ox=l;*oy=t;*ow=MAX(1,r-l);*oh=MAX(1,b-t);return;
     }
     double r;
@@ -554,24 +555,36 @@ static void fillBox(int l,int t,int r,int b,DWORD colour){
     RECT rc={l,t,r,b};HBRUSH br=CreateSolidBrush(colour);FillRect(g_bufDC,&rc,br);DeleteObject(br);
 }
 static int handleHalf(void){return MAX(6,g_th/140);}
+static HFONT g_hintFont=0;
+static int g_hintHeight=0;
+static HFONT hintFont(int height){
+    if(!g_hintFont||g_hintHeight!=height){
+        if(g_hintFont)DeleteObject(g_hintFont);
+        g_hintFont=CreateFontW(-height,0,0,0,650,0,0,0,1,0,0,0,0,W("Segoe UI"));g_hintHeight=height;
+    }
+    return g_hintFont;
+}
 /* Drawn only while "Ajustar con el ratón" is on: amber outline, eight handles and a hint. */
 static void drawEditOverlay(int fx,int fy,int fw,int fh){
     DWORD amber=RGB3(245,166,35),white=RGB3(255,255,255),navy=RGB3(19,46,78);
+    /* Outline inside the frame, so it stays visible when the frame fills the screen. */
     int b=MAX(2,g_th/360);
-    fillBox(fx-b,fy-b,fx+fw+b,fy,amber);fillBox(fx-b,fy+fh,fx+fw+b,fy+fh+b,amber);
-    fillBox(fx-b,fy,fx,fy+fh,amber);fillBox(fx+fw,fy,fx+fw+b,fy+fh,amber);
+    fillBox(fx,fy,fx+fw,fy+b,amber);fillBox(fx,fy+fh-b,fx+fw,fy+fh,amber);
+    fillBox(fx,fy,fx+b,fy+fh,amber);fillBox(fx+fw-b,fy,fx+fw,fy+fh,amber);
     int h=handleHalf(),xs[3]={fx,fx+fw/2,fx+fw},ys[3]={fy,fy+fh/2,fy+fh};
+    for(int i=0;i<3;i++){xs[i]=MAX(h+2,MIN(xs[i],g_tw-h-2));ys[i]=MAX(h+2,MIN(ys[i],g_th-h-2));}
     for(int i=0;i<3;i++)for(int j=0;j<3;j++){
         if(i==1&&j==1)continue;
         fillBox(xs[i]-h-2,ys[j]-h-2,xs[i]+h+2,ys[j]+h+2,navy);
         fillBox(xs[i]-h,ys[j]-h,xs[i]+h,ys[j]+h,white);
     }
-    int top=MAX(6,g_th/120),band=MAX(28,g_th/22);
+    /* Hint sized to the projector: ~27 px on 1080 lines, still one line on 1024 x 768. */
+    int textH=MAX(14,g_th/40),top=MAX(6,g_th/120),band=textH*2;
     fillBox(0,top,g_tw,top+band,navy);
     RECT tr={0,top,g_tw,top+band};
-    HGDIOBJ old=SelectObject(g_bufDC,g_fontOverlaySmall);
+    HGDIOBJ old=SelectObject(g_bufDC,hintFont(textH));
     SetBkMode(g_bufDC,TRANSPARENT);SetTextColor(g_bufDC,amber);
-    DrawTextW(g_bufDC,W("AJUSTE DEL ENCUADRE  ·  centro: mover  ·  bordes y esquinas: estirar  ·  Mayús: mantener proporción"),-1,&tr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+    DrawTextW(g_bufDC,W("AJUSTE  ·  centro: mover  ·  bordes y esquinas: estirar  ·  Mayús: proporción"),-1,&tr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
     SelectObject(g_bufDC,old);
 }
 /* Puts the last capture into the frame. Cheap enough to call on every mouse move. */
@@ -631,7 +644,7 @@ static void restoreIfNeeded(void){
 static int startOutput(void){
     g_sourceIndex=comboindex(g_source);g_targetIndex=comboindex(g_target);
     if(g_monitorCount<2 || g_sourceIndex==g_targetIndex || g_sourceIndex>=g_monitorCount || g_targetIndex>=g_monitorCount){
-        MessageBoxW(g_main,W("No hay dos escritorios independientes. Comprueba el modo EXTENDER y pulsa Actualizar pantallas."),W("ProjectorScaler"),0x30);return 0;
+        MessageBoxW(g_main,W("No hay dos escritorios independientes. Comprueba el modo EXTENDER y pulsa Actualizar."),W("ProjectorScaler"),0x30);return 0;
     }
     if(g_targetIndex==controllingIndex()){
         MessageBoxW(g_main,W("PROTECCIÓN ACTIVADA: el destino es la pantalla donde estás manejando ProjectorScaler.\n\nElige la otra pantalla como destino para no ocultar el panel de control."),W("Selección de destino incorrecta"),0x30);return 0;
@@ -714,8 +727,8 @@ static void dragTo(int x,int y,int keepAspect){
             if(up){b=ay;t=ay-(int)(hh+0.5);}else{t=ay;b=ay+(int)(hh+0.5);}
         }
     }
-    g_free[0]=(int)((long long)l*FREE_UNIT/g_tw);g_free[1]=(int)((long long)t*FREE_UNIT/g_th);
-    g_free[2]=(int)((long long)r*FREE_UNIT/g_tw);g_free[3]=(int)((long long)b*FREE_UNIT/g_th);
+    g_free[0]=(int)(((long long)l*FREE_UNIT+g_tw/2)/g_tw);g_free[1]=(int)(((long long)t*FREE_UNIT+g_th/2)/g_th);
+    g_free[2]=(int)(((long long)r*FREE_UNIT+g_tw/2)/g_tw);g_free[3]=(int)(((long long)b*FREE_UNIT+g_th/2)/g_th);
     compose();
 }
 static LRESULT __stdcall outputProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
@@ -813,7 +826,7 @@ static void loadProfile(void){
     g_cw=(int)GetPrivateProfileIntW(sect,W("CustomWidth"),3,g_ini);
     g_ch=(int)GetPrivateProfileIntW(sect,W("CustomHeight"),2,g_ini);
     g_showCursor=(int)GetPrivateProfileIntW(sect,W("Cursor"),1,g_ini);
-    readFree(sect);
+    if(g_aspectIndex==ASPECT_FREE)readFree(sect);
     g_zoomValue=MAX(20,MIN(g_zoomValue,100));g_xValue=MAX(0,MIN(g_xValue,100));g_yValue=MAX(0,MIN(g_yValue,100));
     g_aspectIndex=MAX(0,MIN(g_aspectIndex,ASPECT_FREE));g_fitIndex=MAX(0,MIN(g_fitIndex,2));
     g_cw=MAX(1,MIN(g_cw,1000));g_ch=MAX(1,MIN(g_ch,1000));
