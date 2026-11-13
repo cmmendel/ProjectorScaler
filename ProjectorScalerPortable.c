@@ -345,6 +345,9 @@ static int refreshMonitors(void){
         if(srcName[0]&&eqw(g_monitors[i].szDevice,srcName)){g_sourceIndex=i;matchedS=1;}
         if(dstName[0]&&eqw(g_monitors[i].szDevice,dstName)){g_targetIndex=i;matchedT=1;}
     }
+    /* In DUPLICAR there is one desktop, so source and target are saved as the same device;
+     * after the switch to EXTENDER that must not count as a kept target. */
+    if(matchedT&&g_targetIndex==g_sourceIndex)matchedT=0;
     if(!matchedT&&g_monitorCount>1){
         int ctl=controllingIndex(),pick=-1;
         for(int i=0;i<g_monitorCount&&pick<0;i++)if(i!=g_sourceIndex&&i!=ctl)pick=i;
@@ -654,7 +657,9 @@ static void fitWindow(HWND hwnd,UINT dpi,const RECT* suggested){
 
     int w=S(BASE_CW)+frameW,h=S(BASE_CH)+frameH;
     int x=suggested?(int)suggested->left:(int)wr.left,y=suggested?(int)suggested->top:(int)wr.top;
-    x=MAX((int)work.left,MIN(x,(int)work.right-w));y=MAX((int)work.top,MIN(y,(int)work.bottom-h));
+    if(!suggested){ /* while dragging across monitors, follow Windows' suggested position */
+        x=MAX((int)work.left,MIN(x,(int)work.right-w));y=MAX((int)work.top,MIN(y,(int)work.bottom-h));
+    }
     SetWindowPos(hwnd,0,x,y,w,h,SWP_NOZORDER|SWP_NOACTIVATE);
     InvalidateRect(hwnd,0,1);
 }
@@ -836,7 +841,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
             else if(g_hotkey==0)status(W("AVISO: no se pudo registrar ninguna tecla de parada de emergencia. Detén siempre con el botón."));
             if(GetPrivateProfileIntW(W("Settings"),W("PendingRestoreClone"),0,g_ini)){
                 iniWrite(W("Settings"),W("PendingRestoreClone"),W("0"));
-                if(topologyMode()==2 && MessageBoxW(hwnd,W("La última vez ProjectorScaler pasó las pantallas a EXTENDER y se cerró sin volver a DUPLICAR.\n\n¿Quieres volver a DUPLICAR ahora?"),W("Restaurar pantallas"),MB_YESNO|MB_ICONQUESTION)==IDYES){
+                if(g_restoreClone && topologyMode()==2 && MessageBoxW(hwnd,W("La última vez ProjectorScaler pasó las pantallas a EXTENDER y se cerró sin volver a DUPLICAR.\n\n¿Quieres volver a DUPLICAR ahora?"),W("Restaurar pantallas"),MB_YESNO|MB_ICONQUESTION)==IDYES){
                     g_switching=1;
                     LONG result=SetDisplayConfig(0,0,0,0,SDC_APPLY|SDC_TOPOLOGY_CLONE);
                     g_switching=0;
