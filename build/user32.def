@@ -38,3 +38,8 @@ EXPORTS
  DrawTextW
  RegisterHotKey
  UnregisterHotKey
+ LoadCursorW
+ GetDpiForWindow
+ GetWindowRect
+ IsDialogMessageW
+ DrawFocusRect

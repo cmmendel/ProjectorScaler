@@ -16,3 +16,4 @@ EXPORTS
  SetBkMode
  RoundRect
  Rectangle
+ SetBrushOrgEx

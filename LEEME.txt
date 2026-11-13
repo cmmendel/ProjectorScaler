@@ -1,4 +1,4 @@
-PROJECTORSCALER PORTABLE 2.0 — Windows 10/11 (x64)
+PROJECTORSCALER PORTABLE 2.1 — Windows 10/11 (x64)
 ================================================
 
 REQUISITOS
@@ -22,6 +22,8 @@ PRIMER USO
 
 TECLA DE SEGURIDAD
 Ctrl + Alt + P: detener la proyección y restaurar la configuración si procede.
+Si otro programa ya usa Ctrl + Alt + P, la tecla pasa a Ctrl + Alt + Mayús + P;
+la línea de estado dice siempre cuál está activa, o avisa si no hay ninguna.
 
 AJUSTES
 - Tamaño en %, posición horizontal/vertical 0-100.
@@ -38,8 +40,8 @@ la presentación; opcionalmente restaura Duplicar al detenerse. Esto cambia
 la topología de Windows y puede reorganizar temporalmente las ventanas.
 
 ESTADO / LIMITACIONES
-- Compilado para Windows x64 y analizadas importaciones Win32; NO probado
-  en una sesión real de Windows 10, Windows 11 o con un proyector HDMI.
+- El código 2.1 NO está compilado todavía ni probado en una sesión real de
+  Windows 10/11 ni con un proyector HDMI. El EXE 2.0 no incluye estos cambios.
 - Versión GDI de hasta 20 fps; no idónea para cine fluido, DRM ni juego.
 - No modifica el audio, no apaga ópticamente la luz del proyector.
 - El EXE no tiene firma de código; SmartScreen podría mostrar una advertencia.
@@ -47,6 +49,23 @@ ESTADO / LIMITACIONES
 - Versiones de Windows 10 anteriores a 1703 no están soportadas.
 - La identificación/cambio de topología con >2 monitores no está validada.
 
+CAMBIOS EN 2.1
+- Las pantallas elegidas en los desplegables se respetan al iniciar (en 2.0 se
+  volvía a la selección anterior sin avisar).
+- Cambiar de pantalla durante la proyección la reinicia sobre la nueva pareja
+  sin volver a DUPLICAR.
+- Los cambios de pantalla de Windows (que llegan en ráfagas) ya no cortan la
+  proyección ni pierden la vuelta a DUPLICAR: se espera a que se asienten y se
+  reajusta la salida; si ya no es válida, se detiene y se restaura DUPLICAR.
+- Si el programa se cierra a la fuerza estando en EXTENDER temporal, al abrirlo
+  de nuevo ofrece volver a DUPLICAR.
+- La ventana se escala con el DPI de cada monitor y se reduce para caber en
+  pantallas bajas (p. ej. 1366 x 768).
+- La captura baja sola de 20 fps hasta 4 fps si el equipo no da abasto, para
+  que el panel siga respondiendo.
+- Avisa si no puede escribir ProjectorScaler.ini; Tab recorre los controles;
+  puntero normal en todas las ventanas; un único botón "Aplicar y guardar".
+
 VERSIÓN
-ProjectorScaler Portable 2.0 — compilado en el entorno de desarrollo Linux
-por clang/lld para Windows x86_64; implementación nativa Win32/GDI.
+ProjectorScaler Portable 2.1 — código fuente; se compila con clang/lld para
+Windows x86_64 (ver COMPILACION.txt); implementación nativa Win32/GDI.

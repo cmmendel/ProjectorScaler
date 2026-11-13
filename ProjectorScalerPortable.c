@@ -51,6 +51,7 @@ API(UINT,GetPrivateProfileIntW,(const WCHAR*,const WCHAR*,int,const WCHAR*));
 API(DWORD,GetPrivateProfileStringW,(const WCHAR*,const WCHAR*,const WCHAR*,WCHAR*,DWORD,const WCHAR*));
 API(DWORD,GetPrivateProfileSectionNamesW,(WCHAR*,DWORD,const WCHAR*));
 API(BOOL,WritePrivateProfileStringW,(const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR*));
+API(DWORD,GetTickCount,(void));
 /* user32 */
 API(int,MessageBoxW,(HWND,const WCHAR*,const WCHAR*,UINT));
 API(unsigned short,RegisterClassExW,(const WNDCLASSEXW*));
@@ -90,6 +91,11 @@ API(int,FillRect,(HDC,const RECT*,HBRUSH));
 API(int,DrawTextW,(HDC,const WCHAR*,int,RECT*,UINT));
 API(BOOL,RegisterHotKey,(HWND,int,UINT,UINT));
 API(BOOL,UnregisterHotKey,(HWND,int));
+API(HCURSOR,LoadCursorW,(HINSTANCE,const WCHAR*));
+API(UINT,GetDpiForWindow,(HWND));
+API(BOOL,GetWindowRect,(HWND,RECT*));
+API(BOOL,IsDialogMessageW,(HWND,MSG*));
+API(BOOL,DrawFocusRect,(HDC,const RECT*));
 /* gdi32 */
 API(HDC,CreateCompatibleDC,(HDC));
 API(BOOL,DeleteDC,(HDC));
@@ -107,6 +113,7 @@ API(DWORD,SetTextColor,(HDC,DWORD));
 API(int,SetBkMode,(HDC,int));
 API(BOOL,RoundRect,(HDC,int,int,int,int,int,int));
 API(BOOL,Rectangle,(HDC,int,int,int,int));
+API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
 
 #define WS_OVERLAPPEDWINDOW 0x00CF0000u
 #define WS_VISIBLE 0x10000000u
@@ -127,7 +134,12 @@ API(BOOL,Rectangle,(HDC,int,int,int,int));
 #define WM_HOTKEY 0x0312u
 #define MOD_ALT 1u
 #define MOD_CONTROL 2u
+#define MOD_SHIFT 4u
 #define ID_EMERGENCY 345
+#define WM_DPICHANGED 0x02E0u
+#define SWP_NOZORDER 0x0004u
+#define ODS_FOCUS 0x0010u
+#define SW_HIDE 0
 #define WM_CTLCOLORSTATIC 0x0138u
 #define WM_CTLCOLOREDIT 0x0133u
 #define ODS_DISABLED 0x0004u
@@ -210,7 +222,19 @@ API(BOOL,Rectangle,(HDC,int,int,int,int));
 #define ID_MODE 125
 #define ID_HIDEIDS 230
 #define ID_BEGIN_AFTER_EXTEND 231
+#define ID_DISPLAY_SETTLE 232
+#define ID_STARTUP_CHECK 233
 #define RGB3(r,g,b) ((DWORD)((r)|((g)<<8)|((b)<<16)))
+
+/* Layout is written at 96 DPI and scaled per monitor (per-monitor-v2 awareness). */
+#define BASE_CW 777
+#define BASE_CH 725
+#define MAXCTL 64
+#define FONT_UI 0
+#define FONT_TITLE 1
+#define FONT_TINY 2
+#define FRAME_MIN_MS 50
+#define FRAME_MAX_MS 250
 
 static HINSTANCE g_inst;
 static HWND g_main, g_output;
@@ -226,13 +250,24 @@ static BYTE g_pathBuf[2048],g_modeBuf[4096];
 static int g_monitorCount=0, g_sourceIndex=0, g_targetIndex=1;
 static int g_zoomValue=60, g_xValue=50, g_yValue=50, g_aspectIndex=0, g_fitIndex=0, g_cw=3,g_ch=2,g_showCursor=1;
 static int g_isBlack=0, g_isRunning=0;
-static WCHAR g_ini[512];
+static WCHAR g_ini[1024];
+static int g_iniError=0;
 static HDC g_capDC=0,g_bufDC=0;
 static HBITMAP g_capBmp=0,g_bufBmp=0;
 static HGDIOBJ g_capOld=0,g_bufOld=0;
 static int g_sw=0,g_sh=0,g_tw=0,g_th=0;
+static int g_frameMs=FRAME_MIN_MS;
+static int g_hotkey=0; /* 0 = none, 1 = Ctrl+Alt+P, 2 = Ctrl+Alt+Shift+P */
+typedef struct { HWND h; int x,y,w,hh,font; } LAYOUT;
+static LAYOUT g_layout[MAXCTL];
+static int g_layoutCount=0;
+static int g_scale=1000; /* per mille of 96 DPI */
+static UINT g_dpi=96;
 
+/* No CRT: the compiler may emit calls to these for zeroing and struct copies. */
 void* memset(void* ptr,int c,SIZE_T len){BYTE* p=(BYTE*)ptr;for(SIZE_T i=0;i<len;i++)p[i]=(BYTE)c;return ptr;}
+void* memcpy(void* dst,const void* src,SIZE_T len){BYTE* d=(BYTE*)dst;const BYTE* s=(const BYTE*)src;for(SIZE_T i=0;i<len;i++)d[i]=s[i];return dst;}
+static int S(int v){return (v*g_scale+(v>=0?500:-500))/1000;}
 static void appendw(WCHAR* out,const WCHAR* text,int cap){int j=0,i=0;while(j<cap-1&&out[j])j++;while(text&&text[i]&&j<cap-1)out[j++]=text[i++];out[j]=0;}
 static void appendi(WCHAR* out,int n,int cap){WCHAR t[32];int k=0,j=0; if(n<0)n=0; do{t[k++]=(WCHAR)('0'+n%10);n/=10;}while(n&&k<31); while(j<cap-1&&out[j])j++; while(k&&j<cap-1)out[j++]=t[--k];out[j]=0;}
 static void copyw(WCHAR* dest,const WCHAR* src,int max){ int i=0; if(!src){dest[0]=0;return;} while(i<max-1&&src[i]){dest[i]=src[i];i++;} dest[i]=0; }
@@ -244,13 +279,28 @@ static void setint(HWND h,int n){WCHAR b[24];intw(b,n);SetWindowTextW(h,b);}
 static void status(const WCHAR* s){if(g_status)SetWindowTextW(g_status,s);}
 static int comboindex(HWND h){LRESULT v=SendMessageW(h,CB_GETCURSEL,0,0);return v<0?0:(int)v;}
 static void comboselect(HWND h,int v){SendMessageW(h,CB_SETCURSEL,(WPARAM)v,0);}
+static HFONT fontOf(int kind){HFONT f=kind==FONT_TITLE?g_fontTitle:kind==FONT_TINY?g_fontTiny:g_fontUi;return f?f:(HFONT)GetStockObject(DEFAULT_GUI_FONT);}
 static HWND ctrl(const WCHAR* cls,const WCHAR* text,DWORD style,int x,int y,int w,int h,int id){
-    HWND p=CreateWindowExW(0,cls,text,style|WS_CHILD|WS_VISIBLE,x,y,w,h,g_main,(HANDLE)(ULONG_PTR)id,g_inst,0);
-    if(p)SendMessageW(p,WM_SETFONT,(WPARAM)(g_fontUi?g_fontUi:GetStockObject(DEFAULT_GUI_FONT)),1);
+    HWND p=CreateWindowExW(0,cls,text,style|WS_CHILD|WS_VISIBLE,S(x),S(y),S(w),S(h),g_main,(HANDLE)(ULONG_PTR)id,g_inst,0);
+    if(p){
+        SendMessageW(p,WM_SETFONT,(WPARAM)fontOf(FONT_UI),1);
+        if(g_layoutCount<MAXCTL){LAYOUT* e=&g_layout[g_layoutCount++];e->h=p;e->x=x;e->y=y;e->w=w;e->hh=h;e->font=FONT_UI;}
+    }
     return p;
 }
+static void setFontKind(HWND h,int kind){
+    for(int i=0;i<g_layoutCount;i++)if(g_layout[i].h==h)g_layout[i].font=kind;
+    if(h)SendMessageW(h,WM_SETFONT,(WPARAM)fontOf(kind),1);
+}
+static void applyLayout(void){
+    for(int i=0;i<g_layoutCount;i++){
+        LAYOUT* e=&g_layout[i];
+        SetWindowPos(e->h,0,S(e->x),S(e->y),S(e->w),S(e->hh),SWP_NOZORDER|SWP_NOACTIVATE);
+        SendMessageW(e->h,WM_SETFONT,(WPARAM)fontOf(e->font),1);
+    }
+}
 static void lbl(const WCHAR* s,int x,int y,int w){ctrl(W("STATIC"),s,SS_LEFT,x,y,w,22,0);}
-static void section(const WCHAR* s,int x,int y,int w){HWND h=ctrl(W("STATIC"),s,SS_LEFT,x,y,w,29,0);SendMessageW(h,WM_SETFONT,(WPARAM)g_fontTitle,1);}
+static void section(const WCHAR* s,int x,int y,int w){HWND h=ctrl(W("STATIC"),s,SS_LEFT,x,y,w,29,0);setFontKind(h,FONT_TITLE);}
 static HWND edit(int id,int x,int y,int w){return ctrl(W("EDIT"),W(""),WS_BORDER|WS_TABSTOP|ES_NUMBER,x,y,w,24,id);}
 static HWND button(const WCHAR* s,int id,int x,int y,int w){return ctrl(W("BUTTON"),s,WS_TABSTOP|BS_OWNERDRAW,x,y,w,34,id);}
 static HWND combo(int id,int x,int y,int w){return ctrl(W("COMBOBOX"),W(""),WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,x,y,w,180,id);}
@@ -273,7 +323,10 @@ static void updateModeLabel(void){
         mode==1?W("MODO ACTUAL: DUPLICAR · Se convertirá temporalmente"):
         W("MODO ACTUAL: Una sola pantalla detectable"));
 }
-static void refreshMonitors(void){
+/* Rebuilds both combos, keeping the current g_sourceIndex/g_targetIndex by device name.
+ * Returns 1 when both previous choices still exist. A kept choice is never changed here:
+ * startOutput() is the one that refuses an unsafe target and tells the user why. */
+static int refreshMonitors(void){
     WCHAR srcName[32]={0},dstName[32]={0};
     int oldCount=g_monitorCount;
     if(oldCount && g_sourceIndex>=0 && g_sourceIndex<oldCount)copyw(srcName,g_monitors[g_sourceIndex].szDevice,32);
@@ -292,13 +345,20 @@ static void refreshMonitors(void){
         if(srcName[0]&&eqw(g_monitors[i].szDevice,srcName)){g_sourceIndex=i;matchedS=1;}
         if(dstName[0]&&eqw(g_monitors[i].szDevice,dstName)){g_targetIndex=i;matchedT=1;}
     }
-    (void)matchedS;
-    if(!matchedT&&g_monitorCount>1){g_targetIndex=0;for(int i=0;i<g_monitorCount;i++)if(i!=p){g_targetIndex=i;break;}}
-    if(g_monitorCount>1 && (g_targetIndex==g_sourceIndex || g_targetIndex==controllingIndex())){
-        for(int i=0;i<g_monitorCount;i++)if(i!=g_sourceIndex && i!=controllingIndex()){g_targetIndex=i;break;}
+    if(!matchedT&&g_monitorCount>1){
+        int ctl=controllingIndex(),pick=-1;
+        for(int i=0;i<g_monitorCount&&pick<0;i++)if(i!=g_sourceIndex&&i!=ctl)pick=i;
+        for(int i=0;i<g_monitorCount&&pick<0;i++)if(i!=g_sourceIndex)pick=i;
+        g_targetIndex=pick<0?0:pick;
     }
     comboselect(g_source,g_sourceIndex);comboselect(g_target,g_targetIndex);
     updateModeLabel();
+    return matchedS&&matchedT;
+}
+static void takeComboSelection(void){
+    if(g_monitorCount<1)return;
+    g_sourceIndex=MIN(comboindex(g_source),g_monitorCount-1);
+    g_targetIndex=MIN(comboindex(g_target),g_monitorCount-1);
 }
 static void dismissIds(void){KillTimer(g_main,ID_HIDEIDS);for(int i=0;i<16;i++)if(g_ids[i]){DestroyWindow(g_ids[i]);g_ids[i]=0;}}
 static void identifyScreens(void){
@@ -342,15 +402,23 @@ static void readControls(void){
     g_aspectIndex=comboindex(g_aspect);g_fitIndex=comboindex(g_fit);
     g_showCursor=(SendMessageW(g_cursor,BM_GETCHECK,0,0)==BST_CHECKED);
 }
+/* Every INI write goes through here so a read-only folder is reported, not hidden. */
+static void iniWrite(const WCHAR* section,const WCHAR* key,const WCHAR* value){
+    if(!WritePrivateProfileStringW(section,key,value,g_ini))g_iniError=1;
+}
+static void writeOne(const WCHAR* section,const WCHAR* key,int value){
+    WCHAR n[32];intw(n,value);iniWrite(section,key,n);
+}
 static void writeConfig(void){
-    WCHAR n[32];
-#define SAVEI(key,value) do{intw(n,value);WritePrivateProfileStringW(W("Settings"),W(key),n,g_ini);}while(0)
-    SAVEI("Zoom",g_zoomValue);SAVEI("PositionX",g_xValue);SAVEI("PositionY",g_yValue);
-    SAVEI("Aspect",g_aspectIndex);SAVEI("Fit",g_fitIndex);SAVEI("CustomWidth",g_cw);SAVEI("CustomHeight",g_ch);
-    SAVEI("ShowCursor",g_showCursor);
-#undef SAVEI
-    if(g_monitorCount>g_sourceIndex)WritePrivateProfileStringW(W("Settings"),W("Source"),g_monitors[g_sourceIndex].szDevice,g_ini);
-    if(g_monitorCount>g_targetIndex)WritePrivateProfileStringW(W("Settings"),W("Target"),g_monitors[g_targetIndex].szDevice,g_ini);
+    const WCHAR* s=W("Settings");
+    writeOne(s,W("Zoom"),g_zoomValue);writeOne(s,W("PositionX"),g_xValue);writeOne(s,W("PositionY"),g_yValue);
+    writeOne(s,W("Aspect"),g_aspectIndex);writeOne(s,W("Fit"),g_fitIndex);writeOne(s,W("CustomWidth"),g_cw);writeOne(s,W("CustomHeight"),g_ch);
+    writeOne(s,W("ShowCursor"),g_showCursor);
+    if(g_monitorCount>g_sourceIndex)iniWrite(s,W("Source"),g_monitors[g_sourceIndex].szDevice);
+    if(g_monitorCount>g_targetIndex)iniWrite(s,W("Target"),g_monitors[g_targetIndex].szDevice);
+}
+static const WCHAR* iniErrorText(void){
+    return W("No se pudo escribir ProjectorScaler.ini: la carpeta del programa no admite escritura. Los ajustes no se guardarán.");
 }
 static void loadSavedMonitors(void){
     WCHAR s[64],t[64];GetPrivateProfileStringW(W("Settings"),W("Source"),W(""),s,64,g_ini);
@@ -369,7 +437,7 @@ static void clearRender(void){
 }
 static void stopOutput(void){
     if(g_output){KillTimer(g_output,1);DestroyWindow(g_output);g_output=0;}
-    clearRender();g_isRunning=0;g_isBlack=0;
+    clearRender();g_isRunning=0;g_isBlack=0;g_frameMs=FRAME_MIN_MS;
     if(g_start)SetWindowTextW(g_start,W("Iniciar proyección"));
     if(g_black){SetWindowTextW(g_black,W("Pantalla negra"));EnableWindow(g_black,0);}
 }
@@ -397,6 +465,15 @@ static void drawCursorOnCapture(void){
     }
     DrawIconEx(g_capDC,(int)ci.ptScreenPos.x-r.left-hotX,(int)ci.ptScreenPos.y-r.top-hotY,(HICON)ci.hCursor,0,0,0,0,DI_NORMAL);
 }
+/* Capture runs on the UI thread. After each timed frame the interval is moved so that
+ * capture takes at most about half the thread's time (50-250 ms), keeping the panel usable
+ * on slow machines or large sources. */
+static void adaptFrameRate(DWORD elapsed){
+    if(!g_output)return;
+    int want=(int)MIN(elapsed,(DWORD)FRAME_MAX_MS)*2;
+    want=MAX(FRAME_MIN_MS,MIN(want,FRAME_MAX_MS));
+    if(want>g_frameMs+15||want<g_frameMs-15){g_frameMs=want;SetTimer(g_output,1,(UINT)g_frameMs,0);}
+}
 static void render(void){
     if(!g_isRunning||!g_bufDC)return;
     PatBlt(g_bufDC,0,0,g_tw,g_th,BLACKNESS);
@@ -419,6 +496,7 @@ static void render(void){
                 else {sh=MAX(1,(int)(g_sw/fr+0.5));sy=(g_sh-sh)/2;}
             }
             SetStretchBltMode(g_bufDC,HALFTONE);
+            SetBrushOrgEx(g_bufDC,0,0,0); /* required by GDI after selecting HALFTONE */
             StretchBlt(g_bufDC,dx,dy,dw,dh,g_capDC,sx,sy,sw,sh,SRCCOPY);
         }
     }
@@ -434,6 +512,8 @@ static int switchToExtend(void){
         g_switching=0;MessageBoxW(g_main,W("Windows no pudo cambiar a EXTENDER. Puedes intentar Win + P > Extender."),W("Error de pantalla"),0x30);return 0;
     }
     g_wasClone=1;g_pending=0;EnableWindow(g_start,0);SetTimer(g_main,ID_BEGIN_AFTER_EXTEND,850,0);
+    /* Survives a crash or a forced close: the next start offers to put DUPLICAR back. */
+    iniWrite(W("Settings"),W("PendingRestoreClone"),W("1"));
     status(W("Cambiando de DUPLICAR a EXTENDER... Se abrirá la proyección en el monitor secundario."));
     return 1;
 }
@@ -441,6 +521,7 @@ static void restoreIfNeeded(void){
     KillTimer(g_main,ID_BEGIN_AFTER_EXTEND);g_pending=0;g_switching=0;EnableWindow(g_start,1);
     if(!g_wasClone)return;
     g_wasClone=0;
+    iniWrite(W("Settings"),W("PendingRestoreClone"),W("0"));
     if(g_restoreClone){
         LONG result=SetDisplayConfig(0,0,0,0,SDC_APPLY|SDC_TOPOLOGY_CLONE);
         if(result!=0)MessageBoxW(g_main,W("No se pudo restaurar DUPLICAR automáticamente. Usa Win + P > Duplicar."),W("Restaurar pantallas"),0x30);
@@ -474,19 +555,24 @@ static int startOutput(void){
     render();SetTimer(g_output,1,50,0);
     SetWindowTextW(g_start,W("Detener proyección"));EnableWindow(g_black,1);
     SetWindowTextW(g_black,W("Pantalla negra"));
-    status(W("Proyección activa a 20 fps máx. El HDMI mantiene su resolución."));
+    status(g_hotkey==1?W("Proyección activa. Parada de emergencia: Ctrl + Alt + P."):
+           g_hotkey==2?W("Proyección activa. Parada de emergencia: Ctrl + Alt + Mayús + P (Ctrl + Alt + P la usa otro programa)."):
+           W("Proyección activa. AVISO: no hay tecla de emergencia; detén con el botón Detener proyección."));
     writeConfig();return 1;
 }
 static LRESULT __stdcall outputProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     (void)l;
     switch(msg){
-    case WM_TIMER:if(w==1)render();return 0;
+    case WM_TIMER:if(w==1){DWORD t0=GetTickCount();render();adaptFrameRate(GetTickCount()-t0);}return 0;
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);if(g_bufDC&&dc)BitBlt(dc,0,0,g_tw,g_th,g_bufDC,0,0,SRCCOPY);EndPaint(hwnd,&ps);return 0;}
     }
     return DefWindowProcW(hwnd,msg,w,l);
 }
-static void applySettings(void){readControls();syncControls();writeConfig();if(g_isRunning)render();status(W("Ajustes aplicados y guardados. Se actualiza la imagen en directo."));}
+static void applySettings(void){
+    readControls();syncControls();g_iniError=0;writeConfig();if(g_isRunning)render();
+    status(g_iniError?iniErrorText():W("Ajustes aplicados y guardados. Se actualiza la imagen en directo."));
+}
 
 static void profileSection(const WCHAR* name,WCHAR* result){
     const WCHAR* prefix=W("Perfil_");int j=0,i=0;
@@ -510,20 +596,17 @@ static void listProfiles(void){
         i++;
     }
 }
-static void writeOne(const WCHAR* section,const WCHAR* key,int value){
-    WCHAR n[32];intw(n,value);WritePrivateProfileStringW(section,key,n,g_ini);
-}
 static void saveProfile(void){
     WCHAR name[64],sect[96];GetWindowTextW(g_profile,name,64);
     if(!name[0]){MessageBoxW(g_main,W("Escribe un nombre para guardar el perfil."),W("ProjectorScaler"),0x40);return;}
     readControls();
-    profileSection(name,sect);
+    profileSection(name,sect);g_iniError=0;
     writeOne(sect,W("Zoom"),g_zoomValue);writeOne(sect,W("X"),g_xValue);writeOne(sect,W("Y"),g_yValue);
     writeOne(sect,W("Aspect"),g_aspectIndex);writeOne(sect,W("Fit"),g_fitIndex);
     writeOne(sect,W("CustomWidth"),g_cw);writeOne(sect,W("CustomHeight"),g_ch);
     writeOne(sect,W("Cursor"),g_showCursor);
     listProfiles();SetWindowTextW(g_profile,name);
-    status(W("Perfil personalizado guardado en el archivo INI."));
+    status(g_iniError?iniErrorText():W("Perfil personalizado guardado en el archivo INI."));
 }
 static void loadProfile(void){
     WCHAR name[64],sect[96],sentinel[12];GetWindowTextW(g_profile,name,64);
@@ -542,15 +625,40 @@ static void loadProfile(void){
     g_zoomValue=MAX(20,MIN(g_zoomValue,100));g_xValue=MAX(0,MIN(g_xValue,100));g_yValue=MAX(0,MIN(g_yValue,100));
     g_aspectIndex=MAX(0,MIN(g_aspectIndex,5));g_fitIndex=MAX(0,MIN(g_fitIndex,2));
     g_cw=MAX(1,MIN(g_cw,1000));g_ch=MAX(1,MIN(g_ch,1000));
-    syncControls();applySettings();status(W("Perfil cargado y aplicado."));
+    syncControls();applySettings();if(!g_iniError)status(W("Perfil cargado y aplicado."));
 }
 
 static void preset(int zoom,int aspect){g_zoomValue=zoom;g_xValue=50;g_yValue=50;g_aspectIndex=aspect;g_fitIndex=0;syncControls();applySettings();}
+/* Picks the scale for this DPI, shrinking it if the panel would not fit the monitor's work
+ * area (a 1366x768 laptop above its taskbar), then re-creates the fonts and moves every control. */
+static void fitWindow(HWND hwnd,UINT dpi,const RECT* suggested){
+    RECT wr={0},cr={0};GetWindowRect(hwnd,&wr);GetClientRect(hwnd,&cr);
+    int frameW=(int)((wr.right-wr.left)-cr.right),frameH=(int)((wr.bottom-wr.top)-cr.bottom);
+    if(g_dpi&&dpi!=g_dpi){frameW=frameW*(int)dpi/(int)g_dpi;frameH=frameH*(int)dpi/(int)g_dpi;}
+    MONITORINFOEXW mi={0};mi.cbSize=sizeof(mi);
+    RECT work={0,0,BASE_CW+frameW,BASE_CH+frameH};
+    if(GetMonitorInfoW(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST),&mi))work=mi.rcWork;
+    int scale=(int)dpi*1000/96;
+    int fitH=((int)(work.bottom-work.top)-frameH)*1000/BASE_CH;
+    int fitW=((int)(work.right-work.left)-frameW)*1000/BASE_CW;
+    scale=MIN(scale,MIN(fitH,fitW));
+    g_scale=MAX(500,scale);g_dpi=dpi;
+
+    HFONT old[4]={g_fontUi,g_fontTitle,g_fontHeader,g_fontTiny};
+    g_fontUi=CreateFontW(S(-17),0,0,0,400,0,0,0,1,0,0,0,0,W("Segoe UI"));
+    g_fontTitle=CreateFontW(S(-20),0,0,0,700,0,0,0,1,0,0,0,0,W("Segoe UI"));
+    g_fontHeader=CreateFontW(S(-29),0,0,0,700,0,0,0,1,0,0,0,0,W("Segoe UI"));
+    g_fontTiny=CreateFontW(S(-15),0,0,0,400,0,0,0,1,0,0,0,0,W("Segoe UI"));
+    applyLayout();
+    for(int i=0;i<4;i++)if(old[i])DeleteObject(old[i]);
+
+    int w=S(BASE_CW)+frameW,h=S(BASE_CH)+frameH;
+    int x=suggested?(int)suggested->left:(int)wr.left,y=suggested?(int)suggested->top:(int)wr.top;
+    x=MAX((int)work.left,MIN(x,(int)work.right-w));y=MAX((int)work.top,MIN(y,(int)work.bottom-h));
+    SetWindowPos(hwnd,0,x,y,w,h,SWP_NOZORDER|SWP_NOACTIVATE);
+    InvalidateRect(hwnd,0,1);
+}
 static void createUI(void){
-    g_fontUi=CreateFontW(-17,0,0,0,400,0,0,0,1,0,0,0,0,W("Segoe UI"));
-    g_fontTitle=CreateFontW(-20,0,0,0,700,0,0,0,1,0,0,0,0,W("Segoe UI"));
-    g_fontHeader=CreateFontW(-29,0,0,0,700,0,0,0,1,0,0,0,0,W("Segoe UI"));
-    g_fontTiny=CreateFontW(-15,0,0,0,400,0,0,0,1,0,0,0,0,W("Segoe UI"));
     g_fontOverlay=CreateFontW(-168,0,0,0,800,0,0,0,1,0,0,0,0,W("Segoe UI"));
     g_fontOverlaySmall=CreateFontW(-30,0,0,0,650,0,0,0,1,0,0,0,0,W("Segoe UI"));
     g_brWhite=CreateSolidBrush(RGB3(255,255,255));g_brWindow=CreateSolidBrush(RGB3(239,243,248));
@@ -563,7 +671,7 @@ static void createUI(void){
     button(W("IDENTIFICAR PANTALLAS"),ID_IDENTIFY,40,176,255);
     button(W("Actualizar lista"),ID_RELOAD,308,176,184);
     g_modeLabel=ctrl(W("STATIC"),W("Comprobando configuración..."),0,504,183,233,30,ID_MODE);
-    SendMessageW(g_modeLabel,WM_SETFONT,(WPARAM)g_fontTiny,1);
+    setFontKind(g_modeLabel,FONT_TINY);
 
     section(W("02   IMAGEN Y GEOMETRÍA"),40,231,470);
     lbl(W("Tamaño (%)"),41,266,168);g_zoom=edit(ID_ZOOM,40,290,142);
@@ -575,8 +683,7 @@ static void createUI(void){
     lbl(W("Adaptación"),427,332,225);g_fit=combo(ID_FIT,427,358,310);
     add(g_fit,W("Ajustar · Sin deformar"));add(g_fit,W("Rellenar · Con recorte"));add(g_fit,W("Estirar · Puede deformar"));
     g_cursor=ctrl(W("BUTTON"),W("Mostrar puntero del ratón"),BS_AUTOCHECKBOX|WS_TABSTOP,40,401,238,29,ID_CURSOR);
-    g_apply=button(W("Aplicar cambios"),ID_APPLY,344,399,189);
-    button(W("Guardar ajustes"),ID_SAVE,548,399,189);
+    g_apply=button(W("Aplicar y guardar"),ID_APPLY,344,399,393);
 
     section(W("03   PERFILES DE PROYECCIÓN"),40,449,466);
     button(W("Cine 16:9"),ID_CINEMA,40,484,211);
@@ -591,20 +698,22 @@ static void createUI(void){
     g_black=button(W("PANTALLA NEGRA"),ID_BLACK,400,590,337);EnableWindow(g_black,0);
     g_restoreBox=ctrl(W("BUTTON"),W("Restaurar DUPLICAR al terminar (si se cambió automáticamente)"),BS_AUTOCHECKBOX|WS_TABSTOP,40,631,700,25,ID_RESTORE_CLONE);
     g_status=ctrl(W("STATIC"),W("Identifica las pantallas y selecciona la del proyector como destino."),0,40,663,695,38,ID_STATUS);
-    SendMessageW(g_status,WM_SETFONT,(WPARAM)g_fontTiny,1);
+    setFontKind(g_status,FONT_TINY);
     refreshMonitors();loadSavedMonitors();readConfig();syncControls();listProfiles();
     g_restoreClone=GetPrivateProfileIntW(W("Settings"),W("RestoreClone"),1,g_ini)?1:0;
     SendMessageW(g_restoreBox,BM_SETCHECK,g_restoreClone?BST_CHECKED:0,0);
     updateModeLabel();
 }
-static void paintCard(HDC dc,int x,int y,int w,int h){RECT r={x,y,x+w,y+h};FillRect(dc,&r,g_brWhite);}
+static void paintCard(HDC dc,int x,int y,int w,int h){RECT r={S(x),S(y),S(x+w),S(y+h)};FillRect(dc,&r,g_brWhite);}
 static void paintMain(HWND hwnd){
     PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);RECT r={0};GetClientRect(hwnd,&r);
     FillRect(dc,&r,g_brWindow);
-    RECT banner={0,0,r.right,68};HBRUSH navy=CreateSolidBrush(RGB3(25,48,77));FillRect(dc,&banner,navy);DeleteObject(navy);
+    RECT banner={0,0,r.right,S(68)};HBRUSH navy=CreateSolidBrush(RGB3(25,48,77));FillRect(dc,&banner,navy);DeleteObject(navy);
     SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB3(255,255,255));
-    RECT hdr={40,5,600,45};SelectObject(dc,g_fontHeader);DrawTextW(dc,W("ProjectorScaler"),-1,&hdr,0);
-    SelectObject(dc,g_fontTiny);RECT subtitle={42,44,720,65};SetTextColor(dc,RGB3(200,222,240));DrawTextW(dc,W("Control de proyección · Windows 10/11 · Portátil"),-1,&subtitle,0);
+    HGDIOBJ oldFont=SelectObject(dc,g_fontHeader);
+    RECT hdr={S(40),S(5),S(600),S(45)};DrawTextW(dc,W("ProjectorScaler"),-1,&hdr,0);
+    SelectObject(dc,g_fontTiny);RECT subtitle={S(42),S(44),S(720),S(65)};SetTextColor(dc,RGB3(200,222,240));DrawTextW(dc,W("Control de proyección · Windows 10/11 · Portátil"),-1,&subtitle,0);
+    SelectObject(dc,oldFont);
     paintCard(dc,20,75,737,144);paintCard(dc,20,225,737,216);paintCard(dc,20,448,737,129);paintCard(dc,20,583,737,122);
     EndPaint(hwnd,&ps);
 }
@@ -625,8 +734,10 @@ static void drawButton(const void* data){
     RoundRect(d->hDC,d->rcItem.left,d->rcItem.top,d->rcItem.right,d->rcItem.bottom,11,11);
     SelectObject(d->hDC,oldPen);SelectObject(d->hDC,old);DeleteObject(brush);
     RECT r=d->rcItem;WCHAR label[128]={0};GetWindowTextW(d->hwndItem,label,128);
-    SelectObject(d->hDC,g_fontUi);SetBkMode(d->hDC,TRANSPARENT);SetTextColor(d->hDC,fg);
+    HGDIOBJ oldFont=SelectObject(d->hDC,g_fontUi);SetBkMode(d->hDC,TRANSPARENT);SetTextColor(d->hDC,fg);
     DrawTextW(d->hDC,label,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+    SelectObject(d->hDC,oldFont);
+    if(d->itemState&ODS_FOCUS){RECT f={r.left+S(4),r.top+S(4),r.right-S(4),r.bottom-S(4)};DrawFocusRect(d->hDC,&f);}
 }
 static LRESULT __stdcall identifyProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     if(msg==WM_ERASEBKGND)return 1;
@@ -648,26 +759,38 @@ static LRESULT __stdcall identifyProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
 static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     (void)l;
     switch(msg){
-    case WM_CREATE: g_main=hwnd;createUI();return 0;
+    case WM_CREATE:
+        g_main=hwnd;g_dpi=GetDpiForWindow(hwnd);if(!g_dpi)g_dpi=96;
+        fitWindow(hwnd,g_dpi,0);createUI();
+        SetTimer(hwnd,ID_STARTUP_CHECK,400,0);
+        return 0;
+    case WM_DPICHANGED:
+        fitWindow(hwnd,(UINT)(w&0xffff),(const RECT*)l);return 0;
     case WM_COMMAND:{
         int id=(int)(w&0xffff),code=(int)((w>>16)&0xffff);
         if(code==CBN_SELCHANGE && (id==ID_SOURCE||id==ID_TARGET)){
-            if(g_isRunning){stopOutput();restoreIfNeeded();status(W("Se cambió el monitor: proyección detenida por seguridad."));}
+            takeComboSelection();
+            if(g_isRunning){
+                /* Stay in EXTENDER and restart on the new pair; DUPLICAR comes back on Stop. */
+                stopOutput();
+                if(startOutput())status(W("Pantallas cambiadas: proyección reiniciada con la nueva selección."));
+                else status(W("Proyección detenida: la nueva selección no es válida. Corrígela y pulsa Iniciar."));
+            }
             return 0;
         }
         if(id==ID_RESTORE_CLONE && code==0){
             g_restoreClone=(SendMessageW(g_restoreBox,BM_GETCHECK,0,0)==BST_CHECKED);
-            WCHAR n[10];intw(n,g_restoreClone);WritePrivateProfileStringW(W("Settings"),W("RestoreClone"),n,g_ini);
+            g_iniError=0;writeOne(W("Settings"),W("RestoreClone"),g_restoreClone);
+            if(g_iniError)status(iniErrorText());
             return 0;
         }
         if(code!=0)break;
         switch(id){
         case ID_APPLY:applySettings();break;
-        case ID_SAVE:applySettings();break;
         case ID_START:
             if(g_isRunning){stopOutput();restoreIfNeeded();status(W("Proyección detenida. Configuración restaurada si correspondía."));}
             else {
-                readControls();refreshMonitors();
+                takeComboSelection();readControls();refreshMonitors();
                 if(topologyMode()==1){switchToExtend();}
                 else if(topologyMode()==2){startOutput();}
                 else MessageBoxW(g_main,W("Solo se detecta una salida de vídeo. Conecta el proyector y configura Windows para DUPLICAR o EXTENDER."),W("No hay segundo monitor"),0x30);
@@ -683,12 +806,46 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         }return 0;
     }
     case WM_DISPLAYCHANGE:
+        /* Windows sends these in bursts (topology, then each mode). Hide the output at once
+         * so it can never cover the panel, and decide once things have settled. */
         if(g_switching)return 0;
         dismissIds();
-        if(g_isRunning){stopOutput();g_wasClone=0;status(W("La configuración de pantallas cambió externamente. Se ha detenido la proyección."));}
-        refreshMonitors();return 0;
+        if(g_output)ShowWindow(g_output,SW_HIDE);
+        SetTimer(hwnd,ID_DISPLAY_SETTLE,700,0);
+        return 0;
     case WM_TIMER:
         if(w==ID_HIDEIDS){dismissIds();return 0;}
+        if(w==ID_DISPLAY_SETTLE){
+            KillTimer(hwnd,ID_DISPLAY_SETTLE);
+            if(g_switching)return 0;
+            int same=refreshMonitors();
+            if(g_isRunning){
+                stopOutput();
+                if(same && topologyMode()==2 && startOutput())
+                    status(W("La configuración de pantallas cambió: proyección reajustada a la nueva resolución."));
+                else {
+                    restoreIfNeeded();
+                    status(W("La configuración de pantallas cambió y la salida ya no es válida: proyección detenida."));
+                }
+            }
+            return 0;
+        }
+        if(w==ID_STARTUP_CHECK){
+            KillTimer(hwnd,ID_STARTUP_CHECK);
+            if(g_hotkey==2)status(W("Ctrl + Alt + P la usa otro programa: la parada de emergencia será Ctrl + Alt + Mayús + P."));
+            else if(g_hotkey==0)status(W("AVISO: no se pudo registrar ninguna tecla de parada de emergencia. Detén siempre con el botón."));
+            if(GetPrivateProfileIntW(W("Settings"),W("PendingRestoreClone"),0,g_ini)){
+                iniWrite(W("Settings"),W("PendingRestoreClone"),W("0"));
+                if(topologyMode()==2 && MessageBoxW(hwnd,W("La última vez ProjectorScaler pasó las pantallas a EXTENDER y se cerró sin volver a DUPLICAR.\n\n¿Quieres volver a DUPLICAR ahora?"),W("Restaurar pantallas"),MB_YESNO|MB_ICONQUESTION)==IDYES){
+                    g_switching=1;
+                    LONG result=SetDisplayConfig(0,0,0,0,SDC_APPLY|SDC_TOPOLOGY_CLONE);
+                    g_switching=0;
+                    if(result!=0)MessageBoxW(hwnd,W("No se pudo restaurar DUPLICAR automáticamente. Usa Win + P > Duplicar."),W("Restaurar pantallas"),0x30);
+                    refreshMonitors();
+                }
+            }
+            return 0;
+        }
         if(w==ID_BEGIN_AFTER_EXTEND){
             refreshMonitors();
             if(topologyMode()==2){
@@ -723,22 +880,35 @@ int _fltused = 0;
 void mainCRTStartup(void){
     g_inst=GetModuleHandleW(0);
     SetProcessDpiAwarenessContext((void*)(LONG_PTR)-4);
-    DWORD len=GetModuleFileNameW(0,g_ini,512);
-    if(!len||len>480){copyw(g_ini,W("ProjectorScaler.ini"),512);} else{
-        int cut=(int)len-1;while(cut>=0&&g_ini[cut]!='\\'&&g_ini[cut]!='/')cut--;
-        int pos=cut+1;const WCHAR* n=W("ProjectorScaler.ini");int i=0;while(n[i]&&pos+i<511){g_ini[pos+i]=n[i];i++;}g_ini[pos+i]=0;
+    /* The INI lives next to the EXE. A bare file name would make the Profile API use the
+     * Windows directory, so a path too long to hold it is never truncated to one. */
+    const DWORD cap=(DWORD)SIZEOF(g_ini);
+    DWORD len=GetModuleFileNameW(0,g_ini,cap);
+    int cut=(int)len-1;while(cut>=0&&g_ini[cut]!='\\'&&g_ini[cut]!='/')cut--;
+    const WCHAR* iniName=W("ProjectorScaler.ini");
+    if(!len||len>=cap||cut<0||cut+1+20>=(int)cap){
+        MessageBoxW(0,W("La ruta de la carpeta del programa es demasiado larga. Mueve ProjectorScaler a una carpeta más corta."),W("ProjectorScaler"),0x10);
+        ExitProcess(4);
     }
-    WNDCLASSEXW c={0};c.cbSize=sizeof(c);c.lpfnWndProc=mainProc;c.hInstance=g_inst;c.lpszClassName=W("ProjectorScalerMain");c.hbrBackground=(HBRUSH)(ULONG_PTR)(5+1);
+    {int i=0;while(iniName[i]){g_ini[cut+1+i]=iniName[i];i++;}g_ini[cut+1+i]=0;}
+    HCURSOR arrow=LoadCursorW(0,IDC_ARROW);
+    WNDCLASSEXW c={0};c.cbSize=sizeof(c);c.lpfnWndProc=mainProc;c.hInstance=g_inst;c.hCursor=arrow;c.lpszClassName=W("ProjectorScalerMain");c.hbrBackground=(HBRUSH)(ULONG_PTR)(5+1);
     if(!RegisterClassExW(&c)){ExitProcess(1);}
-    WNDCLASSEXW o={0};o.cbSize=sizeof(o);o.lpfnWndProc=outputProc;o.hInstance=g_inst;o.lpszClassName=W("ProjectorScalerOutput");o.hbrBackground=(HBRUSH)(ULONG_PTR)(4+1);
+    WNDCLASSEXW o={0};o.cbSize=sizeof(o);o.lpfnWndProc=outputProc;o.hInstance=g_inst;o.hCursor=arrow;o.lpszClassName=W("ProjectorScalerOutput");o.hbrBackground=(HBRUSH)(ULONG_PTR)(4+1);
     if(!RegisterClassExW(&o)){ExitProcess(2);}
-    WNDCLASSEXW idc={0};idc.cbSize=sizeof(idc);idc.lpfnWndProc=identifyProc;idc.hInstance=g_inst;idc.lpszClassName=W("ProjectorScalerIdentify");idc.hbrBackground=(HBRUSH)(ULONG_PTR)(4+1);
+    WNDCLASSEXW idc={0};idc.cbSize=sizeof(idc);idc.lpfnWndProc=identifyProc;idc.hInstance=g_inst;idc.hCursor=arrow;idc.lpszClassName=W("ProjectorScalerIdentify");idc.hbrBackground=(HBRUSH)(ULONG_PTR)(4+1);
     if(!RegisterClassExW(&idc)){ExitProcess(3);}
-    HWND h=CreateWindowExW(0,W("ProjectorScalerMain"),W("ProjectorScaler 2.0 · Proyección segura"),WS_OVERLAPPEDWINDOW|WS_VISIBLE,120,18,780,748,0,0,g_inst,0);
+    HWND h=CreateWindowExW(0,W("ProjectorScalerMain"),W("ProjectorScaler 2.1 · Proyección segura"),WS_OVERLAPPEDWINDOW|WS_VISIBLE,120,18,780,748,0,0,g_inst,0);
     if(!h){MessageBoxW(0,W("No se pudo iniciar ProjectorScaler."),W("Error"),0x10);ExitProcess(3);}
     ShowWindow(h,SW_SHOW);UpdateWindow(h);
-    RegisterHotKey(h,ID_EMERGENCY,MOD_CONTROL|MOD_ALT,'P');
+    /* The emergency stop is the only way back if the output ever covers the panel:
+     * fall back to a second combination and tell the user which one is live. */
+    if(RegisterHotKey(h,ID_EMERGENCY,MOD_CONTROL|MOD_ALT,'P'))g_hotkey=1;
+    else if(RegisterHotKey(h,ID_EMERGENCY,MOD_CONTROL|MOD_ALT|MOD_SHIFT,'P'))g_hotkey=2;
     MSG m;
-    while(GetMessageW(&m,0,0,0)>0){TranslateMessage(&m);DispatchMessageW(&m);}
+    while(GetMessageW(&m,0,0,0)>0){
+        if(IsDialogMessageW(h,&m))continue; /* Tab / Shift+Tab between controls */
+        TranslateMessage(&m);DispatchMessageW(&m);
+    }
     ExitProcess(0);
 }

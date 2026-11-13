@@ -7,3 +7,4 @@ EXPORTS
  GetPrivateProfileStringW
  GetPrivateProfileSectionNamesW
  WritePrivateProfileStringW
+ GetTickCount
