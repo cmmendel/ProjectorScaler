@@ -1,0 +1,21 @@
+COMPILACION CRUZADA NATIVA EN LINUX (Windows PE x64)
+====================================================
+Compilador: clang 17 --target=x86_64-pc-windows-msvc
+Enlazador:  lld-link 17
+Sin CRT, paquetes externos ni SDK de Windows.
+
+El archivo ProjectorScalerPortable.c declara las interfaces Win32 utilizadas.
+Se generan tres bibliotecas de importacion a partir de los archivos
+kernel32.def, user32.def y gdi32.def. (Se incluyen en fuentes.)
+
+Comandos:
+  cd build
+  lld-link /dll /noentry /def:kernel32.def /out:kernel32.dll /implib:kernel32.lib
+  lld-link /dll /noentry /def:user32.def /out:user32.dll /implib:user32.lib
+  lld-link /dll /noentry /def:gdi32.def /out:gdi32.dll /implib:gdi32.lib
+  clang --target=x86_64-pc-windows-msvc -O2 -c -ffreestanding -fno-builtin -Wall -Wextra ../ProjectorScalerPortable.c -o ProjectorScalerPortable.obj
+  lld-link /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj kernel32.lib user32.lib gdi32.lib
+
+Nota: los DLL generados en build son *marcadores* solo para crear las
+bibliotecas de importacion, NO se distribuyen ni se ejecutan en Windows.
+El ejecutable importa directamente los DLL originales de Windows.
