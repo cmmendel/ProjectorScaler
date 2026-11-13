@@ -675,7 +675,7 @@ static void createUI(void){
     g_target=combo(ID_TARGET,399,139,338);
     button(W("IDENTIFICAR PANTALLAS"),ID_IDENTIFY,40,176,255);
     button(W("Actualizar lista"),ID_RELOAD,308,176,184);
-    g_modeLabel=ctrl(W("STATIC"),W("Comprobando configuración..."),0,504,183,233,30,ID_MODE);
+    g_modeLabel=ctrl(W("STATIC"),W("Comprobando configuración..."),0,504,176,233,42,ID_MODE); /* two lines */
     setFontKind(g_modeLabel,FONT_TINY);
 
     section(W("02   IMAGEN Y GEOMETRÍA"),40,231,470);
