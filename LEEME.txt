@@ -25,9 +25,24 @@ Ctrl + Alt + P: detener la proyección y restaurar la configuración si procede.
 Si otro programa ya usa Ctrl + Alt + P, la tecla pasa a Ctrl + Alt + Mayús + P;
 la línea de estado dice siempre cuál está activa, o avisa si no hay ninguna.
 
+CAMBIAR DE MODO
+El botón "Pasar a DUPLICAR" / "Pasar a EXTENDER" cambia el modo de Windows sin
+pasar por Win + P. Si había una proyección en marcha, se detiene. Un cambio
+manual no se deshace solo al detener la proyección.
+
+AJUSTAR EL ENCUADRE CON EL RATÓN
+Con la proyección en marcha, pulsa "Ajustar con el ratón" y lleva el puntero a
+la pantalla del proyector: aparece un marco ámbar con tiradores.
+- Arrastra el centro para mover la imagen.
+- Arrastra un borde para estirarla hacia ese lado; una esquina, en dos sentidos.
+- Mantén Mayús al arrastrar una esquina para conservar la proporción.
+El formato pasa a "Libre (con el ratón)" y se guarda, también en los perfiles.
+Pulsa "Terminar ajuste" para quitar el marco. Elegir otro formato o un perfil
+vuelve al ajuste por tamaño y posición.
+
 AJUSTES
 - Tamaño en %, posición horizontal/vertical 0-100.
-- Formatos: 16:9, 16:10, 4:3, 21:9, 1:1, personalizado.
+- Formatos: 16:9, 16:10, 4:3, 21:9, 1:1, personalizado y libre (con el ratón).
 - Ajustar (sin deformar), Rellenar (recorta), Estirar (puede deformar).
 - Perfiles, pantalla negra, cursor opcional y botón de actualizar monitores.
 - La configuración se guarda en ProjectorScaler.ini al lado del ejecutable.
@@ -65,6 +80,8 @@ CAMBIOS EN 2.1
   que el panel siga respondiendo.
 - Avisa si no puede escribir ProjectorScaler.ini; Tab recorre los controles;
   puntero normal en todas las ventanas; un único botón "Aplicar y guardar".
+- Botón para pasar entre EXTENDER y DUPLICAR; encuadre ajustable con el ratón
+  sobre el proyector; icono propio en la barra de tareas y en el EXE.
 
 VERSIÓN
 ProjectorScaler Portable 2.1 — código fuente; se compila con clang/lld para

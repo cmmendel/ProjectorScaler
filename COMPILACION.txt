@@ -29,3 +29,10 @@ El paquete ziglang de PyPI trae clang y lld-link. En Git Bash:
   y los mismos comandos de arriba con "zigenv/Scripts/python.exe -m ziglang clang"
   y "zigenv/Scripts/python.exe -m ziglang lld-link" en lugar de clang y lld-link.
 Probado con ziglang 0.17.1 (clang/LLD 22.1.8): -Wall -Wextra sin avisos.
+
+ICONO
+icon/make_icon.py dibuja icon/ProjectorScaler.ico (16 a 256 px) solo con la
+biblioteca estándar de Python; ProjectorScaler.rc lo incrusta en el EXE.
+build-native.sh compila el recurso con llvm-rc (o zig rc) y lo enlaza.
+En Windows con ziglang: CLANG, LLD_LINK y RC apuntan a envoltorios que llaman a
+"python -m ziglang clang", "... lld-link" y "... rc".

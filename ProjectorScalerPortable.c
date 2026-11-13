@@ -96,6 +96,12 @@ API(UINT,GetDpiForWindow,(HWND));
 API(BOOL,GetWindowRect,(HWND,RECT*));
 API(BOOL,IsDialogMessageW,(HWND,MSG*));
 API(BOOL,DrawFocusRect,(HDC,const RECT*));
+API(HANDLE,LoadImageW,(HINSTANCE,const WCHAR*,UINT,int,int,UINT));
+API(int,GetSystemMetrics,(int));
+API(HCURSOR,SetCursor,(HCURSOR));
+API(HWND,SetCapture,(HWND));
+API(BOOL,ReleaseCapture,(void));
+API(BOOL,GetCursorPos,(POINT*));
 /* gdi32 */
 API(HDC,CreateCompatibleDC,(HDC));
 API(BOOL,DeleteDC,(HDC));
@@ -140,6 +146,20 @@ API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
 #define SWP_NOZORDER 0x0004u
 #define ODS_FOCUS 0x0010u
 #define SW_HIDE 0
+#define WM_SETCURSOR 0x0020u
+#define WM_MOUSEMOVE 0x0200u
+#define WM_LBUTTONDOWN 0x0201u
+#define WM_LBUTTONUP 0x0202u
+#define WM_CAPTURECHANGED 0x0215u
+#define MK_SHIFT 0x0004u
+#define HTCLIENT 1
+#define IMAGE_ICON 1u
+#define SM_CXICON 11
+#define SM_CYICON 12
+#define SM_CXSMICON 49
+#define SM_CYSMICON 50
+#define IDI_APP 1
+#define CURSOR_ID(n) ((const WCHAR*)(ULONG_PTR)(n))
 #define WM_CTLCOLORSTATIC 0x0138u
 #define WM_CTLCOLOREDIT 0x0133u
 #define ODS_DISABLED 0x0004u
@@ -220,6 +240,8 @@ API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
 #define ID_IDENTIFY 123
 #define ID_RESTORE_CLONE 124
 #define ID_MODE 125
+#define ID_TOPOLOGY 126
+#define ID_EDITFRAME 127
 #define ID_HIDEIDS 230
 #define ID_BEGIN_AFTER_EXTEND 231
 #define ID_DISPLAY_SETTLE 232
@@ -235,6 +257,18 @@ API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
 #define FONT_TINY 2
 #define FRAME_MIN_MS 50
 #define FRAME_MAX_MS 250
+#define ASPECT_FREE 6     /* frame set by dragging on the projector */
+#define FREE_UNIT 10000   /* free frame stored in 1/10000 of the target screen */
+#define HIT_NONE 0
+#define HIT_MOVE 1
+#define HIT_L 2
+#define HIT_R 3
+#define HIT_T 4
+#define HIT_B 5
+#define HIT_TL 6
+#define HIT_TR 7
+#define HIT_BL 8
+#define HIT_BR 9
 
 static HINSTANCE g_inst;
 static HWND g_main, g_output;
@@ -263,6 +297,10 @@ static LAYOUT g_layout[MAXCTL];
 static int g_layoutCount=0;
 static int g_scale=1000; /* per mille of 96 DPI */
 static UINT g_dpi=96;
+static HWND g_topoBtn,g_editBtn;
+static int g_editFrame=0,g_drag=HIT_NONE,g_dragRect[4],g_tOrgX=0,g_tOrgY=0;
+static POINT g_dragFrom;
+static int g_free[4]={1500,1500,8500,8500}; /* left, top, right, bottom */
 
 /* No CRT: the compiler may emit calls to these for zeroing and struct copies. */
 void* memset(void* ptr,int c,SIZE_T len){BYTE* p=(BYTE*)ptr;for(SIZE_T i=0;i<len;i++)p[i]=(BYTE)c;return ptr;}
@@ -319,9 +357,10 @@ static int topologyMode(void){
 static void updateModeLabel(void){
     if(!g_modeLabel)return;
     int mode=topologyMode();
-    SetWindowTextW(g_modeLabel,mode==2?W("MODO ACTUAL: EXTENDER · Salida independiente"):
-        mode==1?W("MODO ACTUAL: DUPLICAR · Se convertirá temporalmente"):
-        W("MODO ACTUAL: Una sola pantalla detectable"));
+    SetWindowTextW(g_modeLabel,mode==2?W("Modo actual: EXTENDER · salida independiente"):
+        mode==1?W("Modo actual: DUPLICAR · se extenderá al proyectar"):
+        W("Modo actual: una sola pantalla activa"));
+    if(g_topoBtn)SetWindowTextW(g_topoBtn,mode==2?W("Pasar a DUPLICAR"):W("Pasar a EXTENDER"));
 }
 /* Rebuilds both combos, keeping the current g_sourceIndex/g_targetIndex by device name.
  * Returns 1 when both previous choices still exist. A kept choice is never changed here:
@@ -379,6 +418,17 @@ static void identifyScreens(void){
     SetTimer(g_main,ID_HIDEIDS,5000,0);
     status(W("Identificación activa 5 segundos. Localiza el número de cada pantalla."));
 }
+/* The free frame must be a real rectangle inside the screen; anything else falls back. */
+static void readFree(const WCHAR* section){
+    int f[4];
+    f[0]=(int)GetPrivateProfileIntW(section,W("FreeLeft"),1500,g_ini);
+    f[1]=(int)GetPrivateProfileIntW(section,W("FreeTop"),1500,g_ini);
+    f[2]=(int)GetPrivateProfileIntW(section,W("FreeRight"),8500,g_ini);
+    f[3]=(int)GetPrivateProfileIntW(section,W("FreeBottom"),8500,g_ini);
+    for(int i=0;i<4;i++)f[i]=MAX(0,MIN(f[i],FREE_UNIT));
+    if(f[2]-f[0]<100||f[3]-f[1]<100){f[0]=1500;f[1]=1500;f[2]=8500;f[3]=8500;}
+    for(int i=0;i<4;i++)g_free[i]=f[i];
+}
 static void readConfig(void){
     g_zoomValue=(int)GetPrivateProfileIntW(W("Settings"),W("Zoom"),60,g_ini);
     g_xValue=(int)GetPrivateProfileIntW(W("Settings"),W("PositionX"),50,g_ini);
@@ -389,14 +439,18 @@ static void readConfig(void){
     g_ch=(int)GetPrivateProfileIntW(W("Settings"),W("CustomHeight"),2,g_ini);
     g_showCursor=(int)GetPrivateProfileIntW(W("Settings"),W("ShowCursor"),1,g_ini);
     g_zoomValue=MAX(20,MIN(g_zoomValue,100));g_xValue=MAX(0,MIN(g_xValue,100));g_yValue=MAX(0,MIN(g_yValue,100));
-    g_aspectIndex=MAX(0,MIN(g_aspectIndex,5));g_fitIndex=MAX(0,MIN(g_fitIndex,2));
+    g_aspectIndex=MAX(0,MIN(g_aspectIndex,ASPECT_FREE));g_fitIndex=MAX(0,MIN(g_fitIndex,2));
     g_cw=MAX(1,MIN(g_cw,1000));g_ch=MAX(1,MIN(g_ch,1000));
+    readFree(W("Settings"));
 }
 static void syncControls(void){
     setint(g_zoom,g_zoomValue);setint(g_x,g_xValue);setint(g_y,g_yValue);
     setint(g_customW,g_cw);setint(g_customH,g_ch);
     comboselect(g_aspect,g_aspectIndex);comboselect(g_fit,g_fitIndex);
     SendMessageW(g_cursor,BM_SETCHECK,g_showCursor?BST_CHECKED:0,0);
+    /* With a free frame, size and position come from the mouse, not from these fields. */
+    int fixed=g_aspectIndex!=ASPECT_FREE;
+    EnableWindow(g_zoom,fixed);EnableWindow(g_x,fixed);EnableWindow(g_y,fixed);
 }
 static void readControls(void){
     g_zoomValue=getint(g_zoom,g_zoomValue,20,100);
@@ -412,11 +466,16 @@ static void iniWrite(const WCHAR* section,const WCHAR* key,const WCHAR* value){
 static void writeOne(const WCHAR* section,const WCHAR* key,int value){
     WCHAR n[32];intw(n,value);iniWrite(section,key,n);
 }
+static void writeFree(const WCHAR* section){
+    writeOne(section,W("FreeLeft"),g_free[0]);writeOne(section,W("FreeTop"),g_free[1]);
+    writeOne(section,W("FreeRight"),g_free[2]);writeOne(section,W("FreeBottom"),g_free[3]);
+}
 static void writeConfig(void){
     const WCHAR* s=W("Settings");
     writeOne(s,W("Zoom"),g_zoomValue);writeOne(s,W("PositionX"),g_xValue);writeOne(s,W("PositionY"),g_yValue);
     writeOne(s,W("Aspect"),g_aspectIndex);writeOne(s,W("Fit"),g_fitIndex);writeOne(s,W("CustomWidth"),g_cw);writeOne(s,W("CustomHeight"),g_ch);
     writeOne(s,W("ShowCursor"),g_showCursor);
+    writeFree(s);
     if(g_monitorCount>g_sourceIndex)iniWrite(s,W("Source"),g_monitors[g_sourceIndex].szDevice);
     if(g_monitorCount>g_targetIndex)iniWrite(s,W("Target"),g_monitors[g_targetIndex].szDevice);
 }
@@ -443,8 +502,14 @@ static void stopOutput(void){
     clearRender();g_isRunning=0;g_isBlack=0;g_frameMs=FRAME_MIN_MS;
     if(g_start)SetWindowTextW(g_start,W("Iniciar proyección"));
     if(g_black){SetWindowTextW(g_black,W("Pantalla negra"));EnableWindow(g_black,0);}
+    g_editFrame=0;g_drag=HIT_NONE;
+    if(g_editBtn){SetWindowTextW(g_editBtn,W("Ajustar con el ratón"));EnableWindow(g_editBtn,0);}
 }
 static void computeFrame(int* ox,int* oy,int* ow,int* oh){
+    if(g_aspectIndex==ASPECT_FREE){
+        int l=g_free[0]*g_tw/FREE_UNIT,t=g_free[1]*g_th/FREE_UNIT,r=g_free[2]*g_tw/FREE_UNIT,b=g_free[3]*g_th/FREE_UNIT;
+        *ox=l;*oy=t;*ow=MAX(1,r-l);*oh=MAX(1,b-t);return;
+    }
     double r;
     switch(g_aspectIndex){case 1:r=16.0/10;break;case 2:r=4.0/3;break;case 3:r=21.0/9;break;case 4:r=1.0;break;case 5:r=(double)g_cw/(double)g_ch;break;default:r=16.0/9;}
     double w=(double)g_tw;double h=w/r;
@@ -477,33 +542,65 @@ static void adaptFrameRate(DWORD elapsed){
     want=MAX(FRAME_MIN_MS,MIN(want,FRAME_MAX_MS));
     if(want>g_frameMs+15||want<g_frameMs-15){g_frameMs=want;SetTimer(g_output,1,(UINT)g_frameMs,0);}
 }
-static void render(void){
+static void captureSource(void){
+    HDC desktop=GetDC(0);
+    if(!desktop)return;
+    RECT r=g_monitors[g_sourceIndex].rcMonitor;
+    BitBlt(g_capDC,0,0,g_sw,g_sh,desktop,r.left,r.top,SRCCOPY|CAPTUREBLT);
+    ReleaseDC(0,desktop);
+    drawCursorOnCapture();
+}
+static void fillBox(int l,int t,int r,int b,DWORD colour){
+    RECT rc={l,t,r,b};HBRUSH br=CreateSolidBrush(colour);FillRect(g_bufDC,&rc,br);DeleteObject(br);
+}
+static int handleHalf(void){return MAX(6,g_th/140);}
+/* Drawn only while "Ajustar con el ratón" is on: amber outline, eight handles and a hint. */
+static void drawEditOverlay(int fx,int fy,int fw,int fh){
+    DWORD amber=RGB3(245,166,35),white=RGB3(255,255,255),navy=RGB3(19,46,78);
+    int b=MAX(2,g_th/360);
+    fillBox(fx-b,fy-b,fx+fw+b,fy,amber);fillBox(fx-b,fy+fh,fx+fw+b,fy+fh+b,amber);
+    fillBox(fx-b,fy,fx,fy+fh,amber);fillBox(fx+fw,fy,fx+fw+b,fy+fh,amber);
+    int h=handleHalf(),xs[3]={fx,fx+fw/2,fx+fw},ys[3]={fy,fy+fh/2,fy+fh};
+    for(int i=0;i<3;i++)for(int j=0;j<3;j++){
+        if(i==1&&j==1)continue;
+        fillBox(xs[i]-h-2,ys[j]-h-2,xs[i]+h+2,ys[j]+h+2,navy);
+        fillBox(xs[i]-h,ys[j]-h,xs[i]+h,ys[j]+h,white);
+    }
+    int top=MAX(6,g_th/120),band=MAX(28,g_th/22);
+    fillBox(0,top,g_tw,top+band,navy);
+    RECT tr={0,top,g_tw,top+band};
+    HGDIOBJ old=SelectObject(g_bufDC,g_fontOverlaySmall);
+    SetBkMode(g_bufDC,TRANSPARENT);SetTextColor(g_bufDC,amber);
+    DrawTextW(g_bufDC,W("AJUSTE DEL ENCUADRE  ·  centro: mover  ·  bordes y esquinas: estirar  ·  Mayús: mantener proporción"),-1,&tr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+    SelectObject(g_bufDC,old);
+}
+/* Puts the last capture into the frame. Cheap enough to call on every mouse move. */
+static void compose(void){
     if(!g_isRunning||!g_bufDC)return;
     PatBlt(g_bufDC,0,0,g_tw,g_th,BLACKNESS);
+    int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
     if(!g_isBlack){
-        HDC desktop=GetDC(0);
-        if(desktop){
-            RECT r=g_monitors[g_sourceIndex].rcMonitor;
-            BitBlt(g_capDC,0,0,g_sw,g_sh,desktop,r.left,r.top,SRCCOPY|CAPTUREBLT);
-            ReleaseDC(0,desktop);
-            drawCursorOnCapture();
-            int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
-            int sx=0,sy=0,sw=g_sw,sh=g_sh,dx=fx,dy=fy,dw=fw,dh=fh;
-            if(g_fitIndex==0){
-                double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
-                if(ar>fr){dh=MAX(1,(int)(fw/ar+0.5));dy=fy+(fh-dh)/2;}
-                else {dw=MAX(1,(int)(fh*ar+0.5));dx=fx+(fw-dw)/2;}
-            }else if(g_fitIndex==1){
-                double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
-                if(ar>fr){sw=MAX(1,(int)(g_sh*fr+0.5));sx=(g_sw-sw)/2;}
-                else {sh=MAX(1,(int)(g_sw/fr+0.5));sy=(g_sh-sh)/2;}
-            }
-            SetStretchBltMode(g_bufDC,HALFTONE);
-            SetBrushOrgEx(g_bufDC,0,0,0); /* required by GDI after selecting HALFTONE */
-            StretchBlt(g_bufDC,dx,dy,dw,dh,g_capDC,sx,sy,sw,sh,SRCCOPY);
+        int sx=0,sy=0,sw=g_sw,sh=g_sh,dx=fx,dy=fy,dw=fw,dh=fh;
+        if(g_fitIndex==0){
+            double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
+            if(ar>fr){dh=MAX(1,(int)(fw/ar+0.5));dy=fy+(fh-dh)/2;}
+            else {dw=MAX(1,(int)(fh*ar+0.5));dx=fx+(fw-dw)/2;}
+        }else if(g_fitIndex==1){
+            double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
+            if(ar>fr){sw=MAX(1,(int)(g_sh*fr+0.5));sx=(g_sw-sw)/2;}
+            else {sh=MAX(1,(int)(g_sw/fr+0.5));sy=(g_sh-sh)/2;}
         }
+        SetStretchBltMode(g_bufDC,HALFTONE);
+        SetBrushOrgEx(g_bufDC,0,0,0); /* required by GDI after selecting HALFTONE */
+        StretchBlt(g_bufDC,dx,dy,dw,dh,g_capDC,sx,sy,sw,sh,SRCCOPY);
     }
+    if(g_editFrame)drawEditOverlay(fx,fy,fw,fh);
     InvalidateRect(g_output,0,0);
+}
+static void render(void){
+    if(!g_isRunning||!g_bufDC)return;
+    if(!g_isBlack)captureSource();
+    compose();
 }
 static int switchToExtend(void){
     if(MessageBoxW(g_main,W("Windows está en modo DUPLICAR.\n\nPara mostrar una imagen reducida SOLO en el proyector es necesario pasar TEMPORALMENTE a EXTENDER.\n\nLa aplicación podrá restaurar DUPLICAR al detener la proyección.\n\n¿Quieres cambiar ahora a EXTENDER?"),W("Cambiar modo de pantalla"),MB_YESNO|MB_ICONQUESTION)!=IDYES)return 0;
@@ -541,7 +638,7 @@ static int startOutput(void){
     }
     RECT s=g_monitors[g_sourceIndex].rcMonitor,t=g_monitors[g_targetIndex].rcMonitor;
     g_sw=(int)(s.right-s.left);g_sh=(int)(s.bottom-s.top);
-    g_tw=(int)(t.right-t.left);g_th=(int)(t.bottom-t.top);
+    g_tw=(int)(t.right-t.left);g_th=(int)(t.bottom-t.top);g_tOrgX=(int)t.left;g_tOrgY=(int)t.top;
     if(g_sw<2||g_sh<2||g_tw<2||g_th<2){status(W("Error: resolución de monitor incorrecta."));return 0;}
     HDC screen=GetDC(0);
     if(!screen)return 0;
@@ -556,19 +653,109 @@ static int startOutput(void){
     SetWindowPos(g_output,HWND_TOPMOST,t.left,t.top,g_tw,g_th,SWP_NOACTIVATE|SWP_SHOWWINDOW);
     g_isRunning=1;g_isBlack=0;
     render();SetTimer(g_output,1,50,0);
-    SetWindowTextW(g_start,W("Detener proyección"));EnableWindow(g_black,1);
+    SetWindowTextW(g_start,W("Detener proyección"));EnableWindow(g_black,1);EnableWindow(g_editBtn,1);
     SetWindowTextW(g_black,W("Pantalla negra"));
     status(g_hotkey==1?W("Proyección activa. Parada de emergencia: Ctrl + Alt + P."):
            g_hotkey==2?W("Proyección activa. Parada de emergencia: Ctrl + Alt + Mayús + P (Ctrl + Alt + P la usa otro programa)."):
            W("Proyección activa. AVISO: no hay tecla de emergencia; detén con el botón Detener proyección."));
     writeConfig();return 1;
 }
+#define IABS(v) ((v)<0?-(v):(v))
+/* Which part of the frame is under (x,y), in target-screen pixels. */
+static int hitFrame(int x,int y){
+    int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
+    int g=MAX(12,handleHalf()*2),l=fx,t=fy,r=fx+fw,b=fy+fh;
+    if(x<l-g||x>r+g||y<t-g||y>b+g)return HIT_NONE;
+    int nl=IABS(x-l)<=g,nr=IABS(x-r)<=g,nt=IABS(y-t)<=g,nb=IABS(y-b)<=g;
+    if(nt&&nl)return HIT_TL;
+    if(nt&&nr)return HIT_TR;
+    if(nb&&nl)return HIT_BL;
+    if(nb&&nr)return HIT_BR;
+    if(nl)return HIT_L;
+    if(nr)return HIT_R;
+    if(nt)return HIT_T;
+    if(nb)return HIT_B;
+    return (x>l&&x<r&&y>t&&y<b)?HIT_MOVE:HIT_NONE;
+}
+static const WCHAR* cursorFor(int hit){
+    switch(hit){
+    case HIT_MOVE:return CURSOR_ID(32646);              /* IDC_SIZEALL */
+    case HIT_L:case HIT_R:return CURSOR_ID(32644);      /* IDC_SIZEWE */
+    case HIT_T:case HIT_B:return CURSOR_ID(32645);      /* IDC_SIZENS */
+    case HIT_TL:case HIT_BR:return CURSOR_ID(32642);    /* IDC_SIZENWSE */
+    case HIT_TR:case HIT_BL:return CURSOR_ID(32643);    /* IDC_SIZENESW */
+    }
+    return IDC_ARROW;
+}
+/* New frame from the rectangle at drag start plus the mouse offset; always inside the screen. */
+static void dragTo(int x,int y,int keepAspect){
+    int l=g_dragRect[0],t=g_dragRect[1],r=g_dragRect[2],b=g_dragRect[3];
+    int dx=x-(int)g_dragFrom.x,dy=y-(int)g_dragFrom.y,minW=MAX(32,g_tw/40),minH=MAX(24,g_th/40),h=g_drag;
+    if(h==HIT_MOVE){
+        dx=MAX(-l,MIN(dx,g_tw-r));dy=MAX(-t,MIN(dy,g_th-b));
+        l+=dx;r+=dx;t+=dy;b+=dy;
+    }else{
+        if(h==HIT_L||h==HIT_TL||h==HIT_BL)l=MIN(MAX(0,l+dx),r-minW);
+        if(h==HIT_R||h==HIT_TR||h==HIT_BR)r=MAX(MIN(g_tw,r+dx),l+minW);
+        if(h==HIT_T||h==HIT_TL||h==HIT_TR)t=MIN(MAX(0,t+dy),b-minH);
+        if(h==HIT_B||h==HIT_BL||h==HIT_BR)b=MAX(MIN(g_th,b+dy),t+minH);
+        if(keepAspect&&h>=HIT_TL){
+            /* Shift on a corner: keep the start proportions, anchored at the opposite corner. */
+            double w0=g_dragRect[2]-g_dragRect[0],h0=g_dragRect[3]-g_dragRect[1],ar=w0/h0;
+            double w=r-l,hh=b-t;
+            if(w/w0>hh/h0)hh=w/ar;else w=hh*ar;
+            int left=(h==HIT_TL||h==HIT_BL),up=(h==HIT_TL||h==HIT_TR);
+            int ax=left?g_dragRect[2]:g_dragRect[0],ay=up?g_dragRect[3]:g_dragRect[1];
+            double roomW=left?ax:g_tw-ax,roomH=up?ay:g_th-ay,k=1.0;
+            if(w>roomW)k=MIN(k,roomW/w);
+            if(hh>roomH)k=MIN(k,roomH/hh);
+            w*=k;hh*=k;
+            if(left){r=ax;l=ax-(int)(w+0.5);}else{l=ax;r=ax+(int)(w+0.5);}
+            if(up){b=ay;t=ay-(int)(hh+0.5);}else{t=ay;b=ay+(int)(hh+0.5);}
+        }
+    }
+    g_free[0]=(int)((long long)l*FREE_UNIT/g_tw);g_free[1]=(int)((long long)t*FREE_UNIT/g_th);
+    g_free[2]=(int)((long long)r*FREE_UNIT/g_tw);g_free[3]=(int)((long long)b*FREE_UNIT/g_th);
+    compose();
+}
 static LRESULT __stdcall outputProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
-    (void)l;
+    int mx=(int)(short)(l&0xffff),my=(int)(short)((l>>16)&0xffff);
     switch(msg){
     case WM_TIMER:if(w==1){DWORD t0=GetTickCount();render();adaptFrameRate(GetTickCount()-t0);}return 0;
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);if(g_bufDC&&dc)BitBlt(dc,0,0,g_tw,g_th,g_bufDC,0,0,SRCCOPY);EndPaint(hwnd,&ps);return 0;}
+    case WM_SETCURSOR:
+        if(g_editFrame&&(l&0xffff)==HTCLIENT){
+            POINT p;GetCursorPos(&p);
+            int hit=g_drag?g_drag:hitFrame((int)p.x-g_tOrgX,(int)p.y-g_tOrgY);
+            SetCursor(LoadCursorW(0,cursorFor(hit)));return 1;
+        }
+        break;
+    case WM_LBUTTONDOWN:
+        if(g_editFrame){
+            int hit=hitFrame(mx,my);
+            if(hit==HIT_NONE)return 0;
+            /* Any drag turns the frame into a free one, starting from what is on screen now. */
+            int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
+            g_dragRect[0]=fx;g_dragRect[1]=fy;g_dragRect[2]=fx+fw;g_dragRect[3]=fy+fh;
+            g_aspectIndex=ASPECT_FREE;syncControls();
+            g_dragFrom.x=mx;g_dragFrom.y=my;g_drag=hit;SetCapture(hwnd);
+            dragTo(mx,my,0);
+        }
+        return 0;
+    case WM_MOUSEMOVE:
+        if(g_drag)dragTo(mx,my,(w&MK_SHIFT)!=0);
+        return 0;
+    case WM_LBUTTONUP:
+        if(g_drag){
+            dragTo(mx,my,(w&MK_SHIFT)!=0);
+            g_drag=HIT_NONE;ReleaseCapture();
+            g_iniError=0;writeConfig();
+            status(g_iniError?iniErrorText():W("Encuadre libre guardado. Pulsa Terminar ajuste cuando acabes."));
+        }
+        return 0;
+    case WM_CAPTURECHANGED:
+        g_drag=HIT_NONE;return 0;
     }
     return DefWindowProcW(hwnd,msg,w,l);
 }
@@ -608,6 +795,7 @@ static void saveProfile(void){
     writeOne(sect,W("Aspect"),g_aspectIndex);writeOne(sect,W("Fit"),g_fitIndex);
     writeOne(sect,W("CustomWidth"),g_cw);writeOne(sect,W("CustomHeight"),g_ch);
     writeOne(sect,W("Cursor"),g_showCursor);
+    writeFree(sect);
     listProfiles();SetWindowTextW(g_profile,name);
     status(g_iniError?iniErrorText():W("Perfil personalizado guardado en el archivo INI."));
 }
@@ -625,8 +813,9 @@ static void loadProfile(void){
     g_cw=(int)GetPrivateProfileIntW(sect,W("CustomWidth"),3,g_ini);
     g_ch=(int)GetPrivateProfileIntW(sect,W("CustomHeight"),2,g_ini);
     g_showCursor=(int)GetPrivateProfileIntW(sect,W("Cursor"),1,g_ini);
+    readFree(sect);
     g_zoomValue=MAX(20,MIN(g_zoomValue,100));g_xValue=MAX(0,MIN(g_xValue,100));g_yValue=MAX(0,MIN(g_yValue,100));
-    g_aspectIndex=MAX(0,MIN(g_aspectIndex,5));g_fitIndex=MAX(0,MIN(g_fitIndex,2));
+    g_aspectIndex=MAX(0,MIN(g_aspectIndex,ASPECT_FREE));g_fitIndex=MAX(0,MIN(g_fitIndex,2));
     g_cw=MAX(1,MIN(g_cw,1000));g_ch=MAX(1,MIN(g_ch,1000));
     syncControls();applySettings();if(!g_iniError)status(W("Perfil cargado y aplicado."));
 }
@@ -673,9 +862,10 @@ static void createUI(void){
     lbl(W("Pantalla de destino (proyector)"),399,115,342);
     g_source=combo(ID_SOURCE,40,139,341);
     g_target=combo(ID_TARGET,399,139,338);
-    button(W("IDENTIFICAR PANTALLAS"),ID_IDENTIFY,40,176,255);
-    button(W("Actualizar lista"),ID_RELOAD,308,176,184);
-    g_modeLabel=ctrl(W("STATIC"),W("Comprobando configuración..."),0,504,176,233,42,ID_MODE); /* two lines */
+    button(W("IDENTIFICAR"),ID_IDENTIFY,40,176,160);
+    button(W("Actualizar"),ID_RELOAD,208,176,120);
+    g_topoBtn=button(W("Pasar a EXTENDER"),ID_TOPOLOGY,336,176,190);
+    g_modeLabel=ctrl(W("STATIC"),W("Comprobando configuración..."),0,536,176,201,42,ID_MODE); /* two lines */
     setFontKind(g_modeLabel,FONT_TINY);
 
     section(W("02   IMAGEN Y GEOMETRÍA"),40,231,470);
@@ -683,12 +873,13 @@ static void createUI(void){
     lbl(W("Horizontal (0-100)"),232,266,188);g_x=edit(ID_X,231,290,142);
     lbl(W("Vertical (0-100)"),423,266,174);g_y=edit(ID_Y,422,290,142);
     lbl(W("Relación de aspecto"),40,332,216);g_aspect=combo(ID_ASPECT,40,358,191);
-    add(g_aspect,W("16:9 · Pantalla ancha"));add(g_aspect,W("16:10"));add(g_aspect,W("4:3 · Clásico"));add(g_aspect,W("21:9 · Cine"));add(g_aspect,W("1:1 · Cuadrada"));add(g_aspect,W("Personalizada"));
+    add(g_aspect,W("16:9 · Pantalla ancha"));add(g_aspect,W("16:10"));add(g_aspect,W("4:3 · Clásico"));add(g_aspect,W("21:9 · Cine"));add(g_aspect,W("1:1 · Cuadrada"));add(g_aspect,W("Personalizada"));add(g_aspect,W("Libre (con el ratón)"));
     lbl(W("Ancho : Alto"),249,332,178);g_customW=edit(ID_CW,248,358,67);lbl(W(":"),322,360,21);g_customH=edit(ID_CH,342,358,67);
     lbl(W("Adaptación"),427,332,225);g_fit=combo(ID_FIT,427,358,310);
     add(g_fit,W("Ajustar · Sin deformar"));add(g_fit,W("Rellenar · Con recorte"));add(g_fit,W("Estirar · Puede deformar"));
-    g_cursor=ctrl(W("BUTTON"),W("Mostrar puntero del ratón"),BS_AUTOCHECKBOX|WS_TABSTOP,40,401,238,29,ID_CURSOR);
-    g_apply=button(W("Aplicar y guardar"),ID_APPLY,344,399,393);
+    g_cursor=ctrl(W("BUTTON"),W("Mostrar puntero"),BS_AUTOCHECKBOX|WS_TABSTOP,40,401,160,29,ID_CURSOR);
+    g_editBtn=button(W("Ajustar con el ratón"),ID_EDITFRAME,208,399,262);EnableWindow(g_editBtn,0);
+    g_apply=button(W("Aplicar y guardar"),ID_APPLY,478,399,259);
 
     section(W("03   PERFILES DE PROYECCIÓN"),40,449,466);
     button(W("Cine 16:9"),ID_CINEMA,40,484,211);
@@ -732,6 +923,7 @@ static void drawButton(const void* data){
     else if(id==ID_IDENTIFY){bg=RGB3(24,128,139);fg=RGB3(255,255,255);}
     else if(id==ID_BLACK){bg=RGB3(52,63,80);fg=RGB3(255,255,255);}
     else if(id==ID_APPLY){bg=RGB3(209,226,245);}
+    else if(id==ID_EDITFRAME&&g_editFrame){bg=RGB3(245,166,35);fg=RGB3(19,46,78);}
     if(disabled){bg=RGB3(214,221,228);fg=RGB3(131,140,150);}
     if(d->itemState&ODS_SELECTED && !disabled){bg=RGB3(61,86,112);fg=RGB3(255,255,255);}
     HBRUSH brush=CreateSolidBrush(bg),old=(HBRUSH)SelectObject(d->hDC,brush);
@@ -760,6 +952,35 @@ static LRESULT __stdcall identifyProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         EndPaint(hwnd,&ps);return 0;
     }
     return DefWindowProcW(hwnd,msg,w,l);
+}
+static void toggleEditFrame(void){
+    if(!g_isRunning)return;
+    g_editFrame=!g_editFrame;g_drag=HIT_NONE;
+    SetWindowTextW(g_editBtn,g_editFrame?W("Terminar ajuste"):W("Ajustar con el ratón"));
+    InvalidateRect(g_editBtn,0,1);
+    compose();
+    status(g_editFrame?W("Ajuste activo: lleva el puntero al proyector y arrastra el centro, los bordes o las esquinas (Mayús mantiene la proporción)."):
+                       W("Ajuste terminado. El encuadre queda guardado."));
+}
+/* Manual EXTENDER <-> DUPLICAR. A manual choice replaces the automatic restore bookkeeping. */
+static void toggleTopology(void){
+    refreshMonitors();
+    int mode=topologyMode();
+    UINT flag=mode==2?SDC_TOPOLOGY_CLONE:SDC_TOPOLOGY_EXTEND;
+    if(SetDisplayConfig(0,0,0,0,SDC_VALIDATE|flag)!=0){
+        MessageBoxW(g_main,mode==2?W("Windows no admite DUPLICAR con esta conexión."):W("Windows no admite EXTENDER con esta conexión. Comprueba que el proyector está conectado."),W("Cambiar modo de pantalla"),0x30);
+        return;
+    }
+    if(g_isRunning)stopOutput();
+    dismissIds();
+    KillTimer(g_main,ID_BEGIN_AFTER_EXTEND);g_pending=0;EnableWindow(g_start,1);
+    if(g_wasClone){g_wasClone=0;iniWrite(W("Settings"),W("PendingRestoreClone"),W("0"));}
+    g_switching=1;
+    LONG result=SetDisplayConfig(0,0,0,0,SDC_APPLY|flag);
+    g_switching=0;
+    if(result!=0){MessageBoxW(g_main,W("Windows no pudo cambiar el modo. Prueba con Win + P."),W("Cambiar modo de pantalla"),0x30);return;}
+    status(mode==2?W("Pasando a DUPLICAR..."):W("Pasando a EXTENDER..."));
+    SetTimer(g_main,ID_DISPLAY_SETTLE,700,0); /* re-read the screens once Windows settles */
 }
 static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     (void)l;
@@ -792,6 +1013,8 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         if(code!=0)break;
         switch(id){
         case ID_APPLY:applySettings();break;
+        case ID_EDITFRAME:toggleEditFrame();break;
+        case ID_TOPOLOGY:toggleTopology();break;
         case ID_START:
             if(g_isRunning){stopOutput();restoreIfNeeded();status(W("Proyección detenida. Configuración restaurada si correspondía."));}
             else {
@@ -897,7 +1120,9 @@ void mainCRTStartup(void){
     }
     {int i=0;while(iniName[i]){g_ini[cut+1+i]=iniName[i];i++;}g_ini[cut+1+i]=0;}
     HCURSOR arrow=LoadCursorW(0,IDC_ARROW);
-    WNDCLASSEXW c={0};c.cbSize=sizeof(c);c.lpfnWndProc=mainProc;c.hInstance=g_inst;c.hCursor=arrow;c.lpszClassName=W("ProjectorScalerMain");c.hbrBackground=(HBRUSH)(ULONG_PTR)(5+1);
+    HICON iconBig=(HICON)LoadImageW(g_inst,(const WCHAR*)(ULONG_PTR)IDI_APP,IMAGE_ICON,GetSystemMetrics(SM_CXICON),GetSystemMetrics(SM_CYICON),0);
+    HICON iconSmall=(HICON)LoadImageW(g_inst,(const WCHAR*)(ULONG_PTR)IDI_APP,IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),0);
+    WNDCLASSEXW c={0};c.cbSize=sizeof(c);c.lpfnWndProc=mainProc;c.hInstance=g_inst;c.hCursor=arrow;c.hIcon=iconBig;c.hIconSm=iconSmall;c.lpszClassName=W("ProjectorScalerMain");c.hbrBackground=(HBRUSH)(ULONG_PTR)(5+1);
     if(!RegisterClassExW(&c)){ExitProcess(1);}
     WNDCLASSEXW o={0};o.cbSize=sizeof(o);o.lpfnWndProc=outputProc;o.hInstance=g_inst;o.hCursor=arrow;o.lpszClassName=W("ProjectorScalerOutput");o.hbrBackground=(HBRUSH)(ULONG_PTR)(4+1);
     if(!RegisterClassExW(&o)){ExitProcess(2);}

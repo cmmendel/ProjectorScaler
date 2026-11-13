@@ -4,3 +4,4 @@ build/*.dll
 build/*.lib
 build/*.obj
 build/*.exp
+build/*.res

@@ -43,3 +43,9 @@ EXPORTS
  GetWindowRect
  IsDialogMessageW
  DrawFocusRect
+ LoadImageW
+ GetSystemMetrics
+ SetCursor
+ SetCapture
+ ReleaseCapture
+ GetCursorPos
