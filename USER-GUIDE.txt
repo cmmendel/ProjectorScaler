@@ -1,4 +1,4 @@
-PROJECTORSCALER PORTABLE 2.3 — Windows 10/11 (x64)
+PROJECTORSCALER PORTABLE 2.4 — Windows 10/11 (x64)
 ==================================================
 
 WHAT IT DOES
@@ -141,11 +141,16 @@ STATUS / LIMITS
   real Windows 11 desktop with two screens, but NOT yet with an HDMI projector,
   and the projection itself (including the Duplicate/Extend switch and tab
   projection) has not been run in those checks.
-- A whole screen (Basic mode, or the Screens tab) is mirrored by the Windows
-  magnifier, which the graphics card draws at the screen's refresh rate (measured:
-  about 56 frames per second on a 60 Hz screen, in a small test window): meant
-  for video. It is not yet checked on a projector. If the magnifier is not
-  available, the app falls back to the slow capture below.
+- A whole screen (Basic mode, or the Screens tab) shown at full size or larger
+  is mirrored by the Windows magnifier, which the graphics card draws at the
+  screen's refresh rate (measured: about 56 frames per second on a 60 Hz screen,
+  in a small test window): meant for video. It is not yet checked on a
+  projector. If the magnifier is not available, the app falls back to the slow
+  capture below.
+- A whole screen made SMALLER (the usual case) uses the slow capture below,
+  because the magnifier shrinks by dropping whole rows and columns of pixels and
+  small text breaks up. Smooth video at a smaller size needs a new capture path
+  that is not built yet.
 - A single window or browser tab, Black screen, and adjusting the frame with the
   mouse use GDI capture: about 13-20 frames per second (measured: 37 ms per
   1920x1080 frame), down to 4 if the computer cannot keep up. Fine for slides
@@ -164,6 +169,12 @@ STATUS / LIMITS
   screen in Basic mode, have not been run on a live projection.
 - On a 1366 x 768 laptop the Advanced panel is scaled down to fit, to about
   three quarters of its normal size.
+
+CHANGES IN 2.4
+- A smaller picture of a whole screen keeps its definition: it is shrunk by
+  averaging pixels (GDI) instead of the magnifier, which dropped rows and
+  columns. Video at a smaller size is less smooth (about 15-20 frames per
+  second) until a faster path is built.
 
 CHANGES IN 2.3
 - Options menu (gear): start with Windows, check for updates at startup, and
@@ -199,5 +210,5 @@ CHANGES IN 2.1
   on the projector; own icon in the taskbar and the EXE.
 
 VERSION
-ProjectorScaler Portable 2.3 — native Win32/GDI, built with clang/lld for
+ProjectorScaler Portable 2.4 — native Win32/GDI, built with clang/lld for
 Windows x86_64 (see BUILDING.txt).

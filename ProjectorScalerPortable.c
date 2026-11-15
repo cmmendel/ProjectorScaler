@@ -390,7 +390,7 @@ typedef struct {UINT cbSize,fMask;int nMin,nMax;UINT nPage;int nPos,nTrackPos;} 
 #define ID_UPDATE_WAIT 238   /* timer: an update waits for the projection to stop */
 #define WM_UPDATE_CHECKED (WM_APP+1) /* worker thread -> window: wParam = UPD_* */
 #define WM_UPDATE_FETCHED (WM_APP+2) /* worker thread -> window: wParam = DL_* */
-#define APP_VERSION L"2.3"   /* release tags are v<APP_VERSION>: the release workflow checks it */
+#define APP_VERSION L"2.4"   /* release tags are v<APP_VERSION>: the release workflow checks it */
 #define REPO_PATH L"/repos/cmmendel/ProjectorScaler/releases/latest"
 #define RELEASES_PAGE L"https://github.com/cmmendel/ProjectorScaler/releases/latest"
 #define ASSET_NAME "ProjectorScalerPortable.exe"
@@ -952,6 +952,13 @@ static int magRender(void){
     }
     int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
     int sx,sy,sw,sh,dx,dy,dw,dh;pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);
+    /* The magnifier point-samples when it shrinks: measured on a 1-px line pattern, it keeps
+     * only pure black and white at 0.8 and 0.6 and the lines vanish at 0.5. Shrinking goes to
+     * the GDI path (HALFTONE averages); the magnifier keeps 1:1 and enlarging. */
+    if(dw<sw||dh<sh){
+        if(g_magShown){ShowWindow(g_mag,SW_HIDE);g_magShown=0;}
+        return 0;
+    }
     RECT dst={dx,dy,dx+dw,dy+dh};
     if(!g_magShown||dst.left!=g_magDst.left||dst.top!=g_magDst.top||dst.right!=g_magDst.right||dst.bottom!=g_magDst.bottom){
         float m[9]={(float)dw/(float)sw,0,0, 0,(float)dh/(float)sh,0, 0,0,1};
