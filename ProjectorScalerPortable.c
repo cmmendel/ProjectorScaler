@@ -1961,7 +1961,7 @@ static void setMode(int mode){
     if(g_isRunning||g_pending){stopOutput();restoreIfNeeded();status(L("Proyección detenida al cambiar de modo.","Projection stopped when changing mode."));}
     else g_statusText[0]=0; /* each mode starts with its own hint */
     readControls();destroyUI();
-    g_uiMode=mode;g_iniError=0;writeOne(W("Settings"),W("UiMode"),mode);
+    g_uiMode=mode; /* not saved: every start opens in the basic mode */
     fitWindow(g_main,g_dpi,0);createUI();
     if(mode==0)SetTimer(g_main,ID_PREVIEW_TICK,1000,0);else KillTimer(g_main,ID_PREVIEW_TICK);
     InvalidateRect(g_main,0,1);
@@ -2207,7 +2207,7 @@ void mainCRTStartup(void){
         int lang=(int)GetPrivateProfileIntW(W("Settings"),W("Language"),-1,g_ini);
         if(lang<0)lang=((GetUserDefaultUILanguage()&0x3ff)==0x0a)?0:1;
         g_lang=lang?1:0;
-        g_uiMode=GetPrivateProfileIntW(W("Settings"),W("UiMode"),0,g_ini)?1:0;
+        g_uiMode=0; /* always opens in the basic mode, whatever was used last */
     }
     HCURSOR arrow=LoadCursorW(0,IDC_ARROW);
     HICON iconBig=(HICON)LoadImageW(g_inst,(const WCHAR*)(ULONG_PTR)IDI_APP,IMAGE_ICON,GetSystemMetrics(SM_CXICON),GetSystemMetrics(SM_CYICON),0);

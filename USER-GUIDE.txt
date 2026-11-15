@@ -18,7 +18,7 @@ English at once. The choice is saved; on first run the app follows Windows
 
 TWO MODES: BASIC AND ADVANCED
 The Básico / Avanzado (Basic / Advanced) buttons at the top switch between them.
-The choice is saved.
+The app always opens in Basic.
 
 BASIC MODE
 For the usual case: the projector shows the same as your screen, made smaller.
