@@ -205,6 +205,7 @@ API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
 #define SIF_POS 4u
 #define DT_NOPREFIX 0x0800u
 #define DT_CALCRECT 0x0400u
+#define DT_RIGHT 0x0002u
 #define DT_END_ELLIPSIS 0x8000u
 typedef struct {UINT cbSize,fMask;int nMin,nMax;UINT nPage;int nPos,nTrackPos;} SCROLLINFO;
 #define MAXTILES 64
@@ -400,6 +401,9 @@ static WCHAR g_tabExpect[256]; /* the browser's title when the tab was last conf
 static HDC g_tabDC;static HBITMAP g_tabBmp;static HGDIOBJ g_tabOld;static int g_tabBw,g_tabBh;
 static void* g_tabSel; /* the chosen tab's SelectionItem pattern (UI Automation) */
 static void tabRelease(void);
+static int g_pickerOpen=0;     /* advanced: 01 opened tall, 02-04 folded to their titles */
+static int g_advFold0=0,g_advFold1=0; /* g_layout range of the controls of 02-04 */
+static HWND g_advSec[3];        /* the titles of 02, 03 and 04 */
 static RECT g_linkRect; /* "Colegio Mayor Mendel" in the footer, a link to cmmendel.com */
 static int g_overLink=0;
 static const WCHAR* g_tabError=0; /* why the Pestañas tab is empty, when it is not just "no tabs" */
@@ -1230,15 +1234,14 @@ static void createHeader(void){
 }
 static void createBasic(void){
     section(L("LO QUE SE VE EN EL PROYECTOR","WHAT THE PROJECTOR SHOWS"),40,90,690);
-    lbl(L("Tu pantalla, duplicada","Your screen, mirrored"),40,282,250);
-    HWND d=ctrl(W("STATIC"),L("El proyector muestra lo mismo que tu pantalla. Arrastra el marco de la derecha para encajar la imagen en la pared.",
-                              "The projector shows the same as your screen. Drag the frame on the right to fit the picture on the wall."),SS_LEFT,40,310,250,92,0);
+    lbl(L("Proyector  ·  arrastra el centro o las esquinas","Projector  ·  drag the middle or the corners"),40,126,420);
+    g_preview=ctrl(W("ProjectorScalerPreview"),W(""),0,40,152,420,236,ID_PREVIEW);
+    HWND d=ctrl(W("STATIC"),L("El proyector muestra lo mismo que tu pantalla. Arrastra el marco para encajar la imagen en la pared.",
+                              "The projector shows the same as your screen. Drag the frame to fit the picture on the wall."),SS_LEFT,484,152,253,92,0);
     setFontKind(d,FONT_TINY);
-    lbl(L("Proyector  ·  arrastra el centro o las esquinas","Projector  ·  drag the middle or the corners"),310,126,427);
-    g_preview=ctrl(W("ProjectorScalerPreview"),W(""),0,310,152,427,210,ID_PREVIEW);
-    g_sizeLbl=ctrl(W("STATIC"),W(""),SS_LEFT,310,376,170,24,ID_SIZE);
-    button(L("Centrar","Centre"),ID_CENTER,490,370,118);
-    button(L("Ocupar todo","Fill screen"),ID_FILL,618,370,119);
+    g_sizeLbl=ctrl(W("STATIC"),W(""),SS_LEFT,484,268,253,24,ID_SIZE);
+    button(L("Centrar","Centre"),ID_CENTER,484,302,253);
+    button(L("Ocupar todo","Fill screen"),ID_FILL,484,346,253);
     g_start=ctrl(W("BUTTON"),startLabel(0),WS_TABSTOP|BS_OWNERDRAW,40,436,330,44,ID_START);
     g_hintLbl=ctrl(W("STATIC"),W(""),SS_LEFT,390,447,347,24,0);setFontKind(g_hintLbl,FONT_TINY);
     g_status=ctrl(W("STATIC"),L("Pulsa Proyectar. Si Windows está en Duplicar, la app pasa un momento a Extender y vuelve a Duplicar al detener.",
@@ -1252,7 +1255,8 @@ static void createAdvanced(void){
     g_tilesWnd=ctrl(W("ProjectorScalerTiles"),W(""),WS_VSCROLL|WS_TABSTOP,40,118,697,150,ID_TILES);
     g_srcHint=ctrl(W("STATIC"),W(""),SS_LEFT,40,276,697,24,ID_SRCHINT);setFontKind(g_srcHint,FONT_TINY);
 
-    section(L("02   PROYECTOR","02   PROJECTOR"),40,319,290);
+    g_advFold0=g_layoutCount;
+    section(L("02   PROYECTOR","02   PROJECTOR"),40,319,290);g_advSec[0]=g_layout[g_layoutCount-1].h;
     g_topoBtn=button(L("Pasar a EXTENDER","Switch to EXTEND"),ID_TOPOLOGY,336,317,190);
     g_modeLabel=ctrl(W("STATIC"),L("Comprobando configuración...","Checking display settings..."),0,536,315,201,42,ID_MODE); /* two lines */
     setFontKind(g_modeLabel,FONT_TINY);
@@ -1261,7 +1265,7 @@ static void createAdvanced(void){
     button(L("IDENTIFICAR","IDENTIFY"),ID_IDENTIFY,400,362,160);
     button(L("Actualizar","Refresh"),ID_RELOAD,568,362,169);
 
-    section(L("03   IMAGEN Y GEOMETRÍA","03   PICTURE AND GEOMETRY"),40,425,470);
+    section(L("03   IMAGEN Y GEOMETRÍA","03   PICTURE AND GEOMETRY"),40,425,470);g_advSec[1]=g_layout[g_layoutCount-1].h;
     lbl(L("Tamaño (%)","Size (%)"),41,460,168);g_zoom=edit(ID_ZOOM,40,484,142);
     lbl(L("Horizontal (0-100)","Horizontal (0-100)"),232,460,188);g_x=edit(ID_X,231,484,142);
     lbl(L("Vertical (0-100)","Vertical (0-100)"),423,460,174);g_y=edit(ID_Y,422,484,142);
@@ -1276,7 +1280,7 @@ static void createAdvanced(void){
     g_editBtn=button(L("Ajustar con el ratón","Adjust with the mouse"),ID_EDITFRAME,208,593,262);
     g_apply=button(L("Aplicar y guardar","Apply and save"),ID_APPLY,478,593,259);
 
-    section(L("04   PERFILES DE PROYECCIÓN","04   PROJECTION PROFILES"),40,643,466);
+    section(L("04   PERFILES DE PROYECCIÓN","04   PROJECTION PROFILES"),40,643,466);g_advSec[2]=g_layout[g_layoutCount-1].h;
     button(L("Cine 16:9","Cinema 16:9"),ID_CINEMA,40,678,211);
     button(L("Conferencia 4:3","Lecture 4:3"),ID_CONF,262,678,233);
     button(L("Imagen pequeña","Small picture"),ID_SMALL,507,678,230);
@@ -1285,6 +1289,7 @@ static void createAdvanced(void){
     button(L("Guardar perfil","Save profile"),ID_SAVE_PROFILE,428,720,149);
     button(L("Cargar perfil","Load profile"),ID_LOAD_PROFILE,588,720,149);
 
+    g_advFold1=g_layoutCount;g_pickerOpen=0;
     g_start=button(startLabel(0),ID_START,40,784,343);
     g_black=button(L("Pantalla negra","Black screen"),ID_BLACK,400,784,337);
     g_restoreBox=ctrl(W("BUTTON"),L("Restaurar DUPLICAR al terminar (si se cambió automáticamente)","Restore DUPLICATE when finished (if it was changed automatically)"),BS_AUTOCHECKBOX|WS_TABSTOP,40,825,700,25,ID_RESTORE_CLONE);
@@ -1433,10 +1438,37 @@ static void thumbStep(void){
     if(g_tilesWnd)InvalidateRect(g_tilesWnd,0,0);
 }
 /* Clicking a tab, even the open one, lists its sources again. */
+/* Moves one panel control, keeping its base position for later DPI changes. */
+static void moveCtl(HWND h,int x,int y,int w,int hh){
+    for(int i=0;i<g_layoutCount;i++)if(g_layout[i].h==h){LAYOUT* e=&g_layout[i];e->x=x;e->y=y;e->w=w;e->hh=hh;}
+    if(h)SetWindowPos(h,0,S(x),S(y),S(w),S(hh),SWP_NOZORDER|SWP_NOACTIVATE);
+}
+static void setPicker(int open){
+    if(g_uiMode!=1||!g_tilesWnd||open==g_pickerOpen)return;
+    g_pickerOpen=open;
+    for(int i=g_advFold0;i<g_advFold1;i++){
+        HWND h=g_layout[i].h;
+        if(h==g_advSec[0]||h==g_advSec[1]||h==g_advSec[2])continue;
+        ShowWindow(h,open?SW_HIDE:SW_SHOW);
+    }
+    moveCtl(g_advSec[0],40,open?645:319,open?340:290,29);
+    moveCtl(g_advSec[1],40,open?691:425,open?340:470,29);
+    moveCtl(g_advSec[2],40,open?737:643,open?340:466,29);
+    moveCtl(g_tilesWnd,40,118,697,open?474:150);
+    moveCtl(g_srcHint,40,open?600:276,697,24);
+    InvalidateRect(g_main,0,1);
+}
+/* Would this list need the scroll bar in the normal, short picker? */
+static int tilesNeedScroll(void){
+    int cols,tw,th,rowH,gap,pad;tileMetrics(&cols,&tw,&th,&rowH,&gap,&pad);
+    int rows=(g_tileCount+cols-1)/cols;
+    return rows*rowH-gap+2*pad>S(150);
+}
 static void setTileTab(int tab){
     g_tileTab=tab<0||tab>2?0:tab;
     for(int i=0;i<3;i++)if(g_tabBtn[i])InvalidateRect(g_tabBtn[i],0,0);
     fillTiles();
+    setPicker(tilesNeedScroll());
 }
 static int tabActivate(TILE* t); /* brings the browser tab to the front; with the UI Automation code */
 static void selectTile(int i){
@@ -1452,6 +1484,7 @@ static void selectTile(int i){
     if(t->kind==TILE_SCREEN){g_srcWindow=0;g_sourceIndex=t->mon;}
     else g_srcWindow=t->hwnd;
     InvalidateRect(g_tilesWnd,0,0);
+    setPicker(0);
     WCHAR msg[220]={0};appendw(msg,L("Origen: ","Source: "),220);appendw(msg,title,220);
     if(g_isRunning){
         stopOutput();
@@ -1769,19 +1802,6 @@ static void tabGuard(void){
     UINT want=took>400?2000:took>150?1000:500;
     if(want!=g_guardMs){g_guardMs=want;SetTimer(g_main,ID_TABGUARD,g_guardMs,0);}
 }
-/* A still of the source screen, letterboxed into (x,y,w,h) on dc. */
-static void drawScreenThumb(HDC dc,int x,int y,int w,int h){
-    if(g_monitorCount<1)return;
-    RECT s=g_monitors[basicSourceIndex()].rcMonitor;
-    int sw=(int)(s.right-s.left),sh=(int)(s.bottom-s.top);if(sw<1||sh<1)return;
-    int dw=w,dh=(int)((double)w*sh/sw+0.5);if(dh>h){dh=h;dw=(int)((double)h*sw/sh+0.5);}
-    int dx=x+(w-dw)/2,dy=y+(h-dh)/2;
-    boxOn(dc,dx-1,dy-1,dx+dw+1,dy+dh+1,RGB3(37,61,91));
-    HDC scr=GetDC(0);if(!scr)return;
-    SetStretchBltMode(dc,HALFTONE);SetBrushOrgEx(dc,0,0,0);
-    StretchBlt(dc,dx,dy,dw,dh,scr,(int)s.left,(int)s.top,sw,sh,SRCCOPY);
-    ReleaseDC(0,scr);
-}
 static void paintMain(HWND hwnd){
     PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);RECT r={0};GetClientRect(hwnd,&r);
     FillRect(dc,&r,g_brWindow);
@@ -1793,9 +1813,15 @@ static void paintMain(HWND hwnd){
     DrawTextW(dc,L("Control de proyección · Windows 10/11 · Portátil","Projection control · Windows 10/11 · Portable"),-1,&subtitle,0);
     if(g_uiMode==0){
         paintCard(dc,20,80,737,330);paintCard(dc,20,420,737,116);
-        drawScreenThumb(dc,S(40),S(130),S(250),S(146));
     }else{
-        paintCard(dc,20,75,737,232);paintCard(dc,20,313,737,100);paintCard(dc,20,419,737,216);paintCard(dc,20,642,737,129);paintCard(dc,20,777,737,122);
+        if(g_pickerOpen){
+            paintCard(dc,20,75,737,558);paintCard(dc,20,639,737,40);paintCard(dc,20,685,737,40);paintCard(dc,20,731,737,40);paintCard(dc,20,777,737,122);
+            SelectObject(dc,g_fontTiny);SetTextColor(dc,RGB3(96,110,128));
+            for(int i=0;i<3;i++){RECT t={S(400),S(639+46*i),S(737),S(679+46*i)};
+                DrawTextW(dc,L("Pulsa para mostrar","Click to show"),-1,&t,DT_RIGHT|DT_VCENTER|DT_SINGLELINE);}
+        }else{
+            paintCard(dc,20,75,737,232);paintCard(dc,20,313,737,100);paintCard(dc,20,419,737,216);paintCard(dc,20,642,737,129);paintCard(dc,20,777,737,122);
+        }
     }
     paintCredit(dc,S(20),S(BASE_CH-26),S(757),S(BASE_CH-8));
     SelectObject(dc,oldFont);
@@ -2080,7 +2106,6 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         if(w==ID_PREVIEW_TICK){
             /* Keeps the stills of "your screen" roughly current while the basic panel is open. */
             if(g_preview&&!g_pDrag)InvalidateRect(g_preview,0,0);
-            if(g_uiMode==0){RECT t={S(40)-2,S(130)-2,S(290)+2,S(276)+2};InvalidateRect(hwnd,&t,0);}
             return 0;
         }
         if(w==ID_DISPLAY_SETTLE){
@@ -2143,6 +2168,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         break;
     case WM_LBUTTONUP:{
         int x=(int)(short)(l&0xffff),y=(int)(short)((l>>16)&0xffff);
+        if(g_pickerOpen&&y>=S(639)&&y<S(771)&&x>=S(20)&&x<S(757)){setPicker(0);return 0;}
         if(x>=g_linkRect.left&&x<g_linkRect.right&&y>=g_linkRect.top&&y<g_linkRect.bottom)
             ShellExecuteW(hwnd,W("open"),W("https://cmmendel.com"),0,0,1);
         return 0;

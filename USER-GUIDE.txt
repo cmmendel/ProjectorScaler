@@ -23,7 +23,8 @@ The choice is saved.
 BASIC MODE
 For the usual case: the projector shows the same as your screen, made smaller.
 1. Connect the projector. Windows can be in Duplicate or Extend (Win + P).
-2. On the right, the dark area is the projector. Drag the amber frame:
+2. The dark area is the projector, with your screen inside the amber frame.
+   Drag the frame:
    - drag the middle to move the picture;
    - drag a corner to make it bigger or smaller (the proportions are kept).
    "Centre" puts the frame in the middle; "Fill screen" makes it as large as fits.
@@ -39,6 +40,9 @@ Everything else, in four sections.
 Three tabs, each with a still of every source; click one to choose it. Clicking
 a tab, even the open one, lists its sources again. If a projection is running,
 it restarts on the new source.
+When a tab has more sources than fit, section 01 grows to show them all and
+sections 02, 03 and 04 fold down to their titles. They open again as soon as
+you choose a source, or when you click one of the folded titles.
 - Screens: a whole screen, with everything open on it.
 - Windows: only that window (its content, without borders or title bar), even
   when other windows cover it on your screen.
