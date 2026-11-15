@@ -6,8 +6,8 @@ No CRT, no external packages and no Windows SDK.
 
 ProjectorScalerPortable.c declares every Win32 interface it uses. Import
 libraries are made from the .def files in build/ (kernel32, user32, gdi32,
-dwmapi, shell32, ole32, oleaut32, magnification, advapi32, winhttp, d3d11, dxgi), which list only the functions the program
-imports. The DLLs lld-link writes next to them are placeholders used only to
+dwmapi, shell32, ole32, oleaut32, magnification, advapi32, winhttp, d3d11,
+dxgi), which list only the functions the program imports. The DLLs lld-link writes next to them are placeholders used only to
 produce the .lib files; they are never shipped or run. The EXE imports the real
 Windows DLLs.
 
@@ -67,6 +67,14 @@ and downloads its asset ProjectorScalerPortable.exe. To publish a version:
 smoke test and creates the release with the EXE attached. Drafts and
 pre-releases are not offered to the app; a release without the EXE is reported
 only by "Check for updates now".
+
+THE GRAPHICS CARD PATH (DIRECT3D 11)
+A shrunk whole screen goes through DXGI desktop duplication and a pixel shader;
+the COM methods are called by vtable index (the COM macro), checked against
+MinGW's dxgi.h, dxgi1_2.h and d3d11.h. The shader is compiled when projection
+starts by d3dcompiler_47.dll, loaded from System32 only. Building with
+-DGPU_STATS puts the presents and new frames per second in the panel's title
+bar, to measure it.
 
 TESTING THE UPDATER WITHOUT GITHUB
 Compiling with -DUPD_TEST_PORT=8765 makes the update check use plain HTTP on

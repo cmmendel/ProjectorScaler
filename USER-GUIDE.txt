@@ -147,10 +147,15 @@ STATUS / LIMITS
   in a small test window): meant for video. It is not yet checked on a
   projector. If the magnifier is not available, the app falls back to the slow
   capture below.
-- A whole screen made SMALLER (the usual case) uses the slow capture below,
-  because the magnifier shrinks by dropping whole rows and columns of pixels and
-  small text breaks up. Smooth video at a smaller size needs a new capture path
-  that is not built yet.
+- A whole screen made SMALLER (the usual case) is copied by the graphics card
+  (Windows desktop duplication) and shrunk by averaging every pixel it covers,
+  so small text keeps its strokes. Measured on a 60 Hz screen: about 60 frames
+  per second shown, 51-58 new frames per second with moving content, at sizes
+  from 20 % to 80 %. The magnifier is not used for this: it shrinks by dropping
+  whole rows and columns. If the graphics card path is not available (no
+  DirectX 10 card, a remote desktop session), the app falls back to the slow
+  capture below, which also averages. While Windows is locked or a UAC prompt
+  is on screen the picture freezes and resumes about a second later.
 - A single window or browser tab, Black screen, and adjusting the frame with the
   mouse use GDI capture: about 13-20 frames per second (measured: 37 ms per
   1920x1080 frame), down to 4 if the computer cannot keep up. Fine for slides
@@ -161,6 +166,11 @@ STATUS / LIMITS
 - The EXE is not code-signed; SmartScreen may warn on first run.
 - Windows 10 before 1703 is not supported.
 - Identifying and switching layouts with more than two screens is not validated.
+- The graphics card path (2.4) was measured on a Windows 11 desktop with two
+  screens: a 1-px line pattern averaged correctly at 80, 60, 50, 30 and 20 %,
+  about 60 frames per second, the frame dragged while projecting, and both the
+  arrow and the text pointer drawn. Locking Windows, a UAC prompt, Win + P and a
+  resolution change while projecting were not tried.
 - Updates (2.3) were checked against a local stand-in for GitHub: prompt,
   download through a redirect, swap and restart, a corrupt download, a
   read-only folder and no network. Against the real GitHub only the "no
@@ -171,10 +181,9 @@ STATUS / LIMITS
   three quarters of its normal size.
 
 CHANGES IN 2.4
-- A smaller picture of a whole screen keeps its definition: it is shrunk by
-  averaging pixels (GDI) instead of the magnifier, which dropped rows and
-  columns. Video at a smaller size is less smooth (about 15-20 frames per
-  second) until a faster path is built.
+- A smaller picture of a whole screen keeps its definition: the graphics card
+  shrinks it by averaging pixels, at the screen's refresh rate. The magnifier,
+  which dropped rows and columns, is kept only for full size or larger.
 
 CHANGES IN 2.3
 - Options menu (gear): start with Windows, check for updates at startup, and
