@@ -118,7 +118,8 @@ STATUS / LIMITS
   and the projection itself (including the Duplicate/Extend switch and tab
   projection) has not been run in those checks.
 - A whole screen (Basic mode, or the Screens tab) is mirrored by the Windows
-  magnifier, which the graphics card draws at about 60 frames per second: meant
+  magnifier, which the graphics card draws at the screen's refresh rate (measured:
+  about 56 frames per second on a 60 Hz screen, in a small test window): meant
   for video. It is not yet checked on a projector. If the magnifier is not
   available, the app falls back to the slow capture below.
 - A single window or browser tab, Black screen, and adjusting the frame with the

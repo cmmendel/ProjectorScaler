@@ -887,8 +887,10 @@ static int magRender(void){
     }
     RECT m=g_monitors[g_sourceIndex].rcMonitor;
     RECT src={m.left+sx,m.top+sy,m.left+sx+sw,m.top+sy+sh};
+    /* MagSetWindowSource redraws the control itself and waits for the next vertical blank.
+     * Do not also InvalidateRect(g_mag): its WM_PAINT waits for a second blank, halving the rate
+     * (measured: 29 frames per second with it, 55.7 without). */
     if(!MagSetWindowSource(g_mag,src)){ShowWindow(g_mag,SW_HIDE);g_magShown=0;return 0;}
-    InvalidateRect(g_mag,0,0);
     if(!g_magShown){ShowWindow(g_mag,SW_SHOWNA);g_magShown=1;}
     return 1;
 }
