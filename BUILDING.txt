@@ -1,0 +1,57 @@
+BUILDING PROJECTORSCALER (Windows PE x64)
+=========================================
+Compiler: clang --target=x86_64-pc-windows-msvc
+Linker:   lld-link
+No CRT, no external packages and no Windows SDK.
+
+ProjectorScalerPortable.c declares every Win32 interface it uses. Import
+libraries are made from the .def files in build/ (kernel32, user32, gdi32,
+dwmapi, shell32, ole32, oleaut32), which list only the functions the program
+imports. The DLLs lld-link writes next to them are placeholders used only to
+produce the .lib files; they are never shipped or run. The EXE imports the real
+Windows DLLs.
+
+QUICKEST WAY
+build-native.sh does everything below. On Linux it needs clang, lld-link and
+llvm-rc on PATH; elsewhere set CLANG, LLD_LINK and RC (see the Windows section).
+
+  bash build-native.sh
+
+BY HAND
+  cd build
+  for each of kernel32 user32 gdi32 dwmapi shell32 ole32 oleaut32:
+    lld-link /machine:x64 /dll /noentry /def:NAME.def /out:NAME.dll /implib:NAME.lib
+  llvm-rc /fo ProjectorScaler.res ../ProjectorScaler.rc
+  clang --target=x86_64-pc-windows-msvc -O2 -c -ffreestanding -fno-builtin -Wall -Wextra ../ProjectorScalerPortable.c -o ProjectorScalerPortable.obj
+  lld-link /machine:x64 /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib dwmapi.lib shell32.lib ole32.lib oleaut32.lib
+
+ADDING A WIN32 FUNCTION
+Declare it in ProjectorScalerPortable.c with the API(return,name,(args)) macro
+and add its name to the matching build/<dll>.def. A new DLL also needs its name
+in the two lists of build-native.sh (the import-library loop and the link line).
+
+BUILDING ON WINDOWS (no Visual Studio)
+The ziglang package on PyPI ships clang, lld-link and rc. In Git Bash:
+  py -3.12 -m venv zigenv
+  zigenv/Scripts/python.exe -m pip install ziglang==0.17.1
+  export CLANG="zigenv/Scripts/python.exe -m ziglang clang"
+  export LLD_LINK="zigenv/Scripts/python.exe -m ziglang lld-link"
+  export RC="zigenv/Scripts/python.exe -m ziglang rc"
+  bash build-native.sh
+If the variables with spaces give trouble, point them at three tiny wrapper
+scripts that run those commands with "$@". build-native.sh sets
+MSYS2_ARG_CONV_EXCL="*" so Git Bash does not turn /dll into a path.
+Tested with ziglang 0.17.1 (clang/LLD 22): -Wall -Wextra with no warnings.
+
+ICON
+icon/make_icon.py draws icon/ProjectorScaler.ico (16 to 256 px) with Python's
+standard library only; ProjectorScaler.rc embeds it in the EXE.
+
+BUILD DATE
+The footer shows the date the source was compiled (__DATE__), so every build
+carries its own date.
+
+GITHUB ACTIONS
+.github/workflows/build.yml builds on Ubuntu with ziglang 0.17.1 (CLANG,
+LLD_LINK and RC set to "python -m ziglang ...") and checks on Windows that the
+EXE starts and stays running for 8 seconds.

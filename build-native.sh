@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds ProjectorScalerPortable.exe with clang + lld, no CRT and no Windows SDK.
 # Linux: needs clang, lld-link and llvm-rc on PATH.
-# Windows (Git Bash): point the three variables at zig's copies, see COMPILACION.txt.
+# Windows (Git Bash): point the three variables at zig's copies, see BUILDING.txt.
 set -euo pipefail
 export MSYS2_ARG_CONV_EXCL="*"   # Git Bash would otherwise turn /dll into a path
 CLANG="${CLANG:-clang}"

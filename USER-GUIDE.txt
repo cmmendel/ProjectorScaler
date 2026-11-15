@@ -1,0 +1,151 @@
+PROJECTORSCALER PORTABLE 2.2 — Windows 10/11 (x64)
+==================================================
+
+WHAT IT DOES
+Projects your screen, one window or one browser tab onto a projector at the
+size and position you choose, without touching the projector's own settings.
+One EXE, no installer, no .NET.
+
+REQUIREMENTS
+- Windows 10 version 1703 or later, or Windows 11; x64.
+- Two video outputs detected by Windows, ideally the main screen plus a projector.
+- No .NET, installer or external libraries.
+
+LANGUAGE
+The ES / EN buttons at the top right switch the whole app between Spanish and
+English at once. The choice is saved; on first run the app follows Windows
+(Spanish on a Spanish Windows, English otherwise).
+
+TWO MODES: BASIC AND ADVANCED
+The Básico / Avanzado (Basic / Advanced) buttons at the top switch between them.
+The choice is saved.
+
+BASIC MODE
+For the usual case: the projector shows the same as your screen, made smaller.
+1. Connect the projector. Windows can be in Duplicate or Extend (Win + P).
+2. On the right, the dark area is the projector. Drag the amber frame:
+   - drag the middle to move the picture;
+   - drag a corner to make it bigger or smaller (the proportions are kept).
+   "Centre" puts the frame in the middle; "Fill screen" makes it as large as fits.
+   The size is shown as a percentage and is saved.
+3. Press PROJECT. If Windows is in Duplicate, the app switches to Extend while
+   it projects, without asking, and always goes back to Duplicate when you press
+   STOP.
+
+ADVANCED MODE
+Everything else, in four sections.
+
+01 WHAT TO PROJECT
+Three tabs, each with a still of every source; click one to choose it. Clicking
+a tab, even the open one, lists its sources again. If a projection is running,
+it restarts on the new source.
+- Screens: a whole screen, with everything open on it.
+- Windows: only that window (its content, without borders or title bar), even
+  when other windows cover it on your screen.
+  - If you resize the window, the projection follows.
+  - If you minimise it, the projector keeps the last picture until you restore it.
+  - If you close it, the last picture stays and the status line says so.
+  - Some apps with hardware acceleration or DRM may show black.
+- Tabs: one tab of Google Chrome or Microsoft Edge, showing only the page,
+  without the browser's tab strip or address bar.
+  - Choosing a tab makes it the tab on show in its browser window (a minimised
+    browser window is restored, because a minimised window draws nothing).
+  - Only the tab on show has a still; the others say "In background".
+  - Safety: while projecting, the app checks about every half second (less
+    often if the browser answers slowly) that the chosen tab is still the one
+    on show, and on every frame that the browser's title
+    has not changed. If it cannot confirm it (you switched tabs, the browser
+    closed or stopped responding), the picture freezes and the status line
+    says why. Go back to the tab in the browser and it resumes on its own.
+The chosen window or tab is not saved: when the app is opened again, the source
+is a screen.
+
+02 PROJECTOR
+- Target: the projector screen. For safety, the app refuses to project onto the
+  screen that holds its own panel.
+- IDENTIFY shows each screen's number. In Duplicate both outputs show the same
+  picture, so the numbers cannot differ; the app then asks before switching
+  TEMPORARILY to Extend when you start.
+- Refresh reads the screens again.
+- "Switch to DUPLICATE" / "Switch to EXTEND" changes the Windows mode without
+  Win + P. A running projection stops. A manual change is not undone when the
+  projection stops.
+
+03 PICTURE AND GEOMETRY
+- Size in %, horizontal and vertical position 0-100.
+- Aspect ratios: 16:9, 16:10, 4:3, 21:9, 1:1, custom, and free (with the mouse).
+- Fit (no distortion), Fill (crops), Stretch (may distort).
+- Show pointer, and "Apply and save".
+- ADJUST WITH THE MOUSE: while projecting, press it and move the pointer to the
+  projector screen. An amber frame with handles appears.
+  - Drag the middle to move the picture.
+  - Drag an edge to stretch it that way; a corner, both ways.
+  - Hold Shift while dragging a corner to keep the proportions.
+  The aspect ratio becomes "Free (with the mouse)" and is saved, also in
+  profiles. "Finish adjusting" removes the frame.
+
+04 PROJECTION PROFILES
+Cinema 16:9, Lecture 4:3, Small picture, and your own saved profiles.
+
+Bottom: Start/Stop projection, Black screen (picture black, HDMI still on) and
+"Restore DUPLICATE when finished".
+
+EMERGENCY KEY
+Ctrl + Alt + P stops the projection and restores the display settings where
+needed. If another program already uses Ctrl + Alt + P, the key becomes
+Ctrl + Alt + Shift + P; the panel always says which one is active, or warns if
+there is none.
+
+ABOUT DUPLICATE MODE
+In Duplicate, Windows shows the same picture on both outputs, so the projector
+can only be made smaller with extended outputs. ProjectorScaler switches to
+Extend while it projects and can go back to Duplicate when it stops. This changes
+the Windows display layout and may move windows around for a moment. If the app
+is closed by force while in a temporary Extend, it offers to go back to Duplicate
+the next time it opens.
+
+SETTINGS FILE
+Everything is saved in ProjectorScaler.ini next to the EXE, so the folder must
+be writable. The app warns if it cannot write it.
+
+STATUS / LIMITS
+- Builds without warnings (clang 22, -Wall -Wextra). It has been checked on a
+  real Windows 11 desktop with two screens, but NOT yet with an HDMI projector,
+  and the projection itself (including the Duplicate/Extend switch and tab
+  projection) has not been run in those checks.
+- GDI capture up to 20 fps, dropping to 4 fps if the computer cannot keep up;
+  not meant for smooth video, DRM or games.
+- Does not touch audio and does not switch the projector's lamp off.
+- The EXE is not code-signed; SmartScreen may warn on first run.
+- Windows 10 before 1703 is not supported.
+- Identifying and switching layouts with more than two screens is not validated.
+- On a 1366 x 768 laptop the Advanced panel is scaled down to fit, to about
+  three quarters of its normal size.
+
+CHANGES IN 2.2
+- Basic mode: mirror your screen and size it on the projector with the mouse.
+- Advanced mode keeps every option; the source is chosen from stills in three
+  tabs: Screens, Windows and Tabs.
+- Browser tabs (Chrome, Edge) as a source, with the freeze-on-doubt guard.
+- Spanish / English switch for the whole app.
+- Footer credit with the build date, and a link to cmmendel.com.
+
+CHANGES IN 2.1
+- One window can be projected instead of a whole screen.
+- The screens chosen are kept when starting (2.0 went back to the previous
+  choice without saying so).
+- Changing screens while projecting restarts on the new pair without going back
+  to Duplicate.
+- Windows display changes (which arrive in bursts) no longer cut the projection
+  or lose the return to Duplicate: the app waits for them to settle and adjusts
+  the output; if it is no longer valid, it stops and restores Duplicate.
+- The panel scales with each monitor's DPI and shrinks to fit short screens.
+- Capture drops from 20 fps to 4 fps by itself if the computer cannot keep up.
+- Warns if ProjectorScaler.ini cannot be written; Tab moves through the
+  controls; one "Apply and save" button.
+- Button to switch between Extend and Duplicate; frame adjustable with the mouse
+  on the projector; own icon in the taskbar and the EXE.
+
+VERSION
+ProjectorScaler Portable 2.2 — native Win32/GDI, built with clang/lld for
+Windows x86_64 (see BUILDING.txt).
