@@ -8,6 +8,8 @@ touching the projector's own settings. One EXE, no installer, no .NET.
 - **Advanced mode:** every option, with the source chosen from stills in three tabs
   (Screens, Windows, Tabs).
 - **Spanish / English** switch for the whole app.
+- **Options (gear):** start with Windows, and updates from this repository's GitHub
+  releases, installed only after the user confirms.
 
 Links:
 

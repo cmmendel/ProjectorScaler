@@ -65,3 +65,9 @@ EXPORTS
  IsHungAppWindow
  SetLayeredWindowAttributes
  SetWindowLongPtrW
+
+ PostMessageW
+ CreatePopupMenu
+ AppendMenuW
+ TrackPopupMenu
+ DestroyMenu

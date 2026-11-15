@@ -152,6 +152,63 @@ API(int,SetBkMode,(HDC,int));
 API(BOOL,RoundRect,(HDC,int,int,int,int,int,int));
 API(BOOL,Rectangle,(HDC,int,int,int,int));
 API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
+/* Start with Windows and updates from GitHub. Prototypes and constants as in the mingw-w64
+ * headers (winbase.h, fileapi.h, winuser.h, winreg.h, winhttp.h). */
+typedef DWORD (__stdcall *THREADPROC)(void*);
+API(HANDLE,CreateThread,(void*,SIZE_T,THREADPROC,void*,DWORD,DWORD*));
+API(HANDLE,CreateFileW,(const WCHAR*,DWORD,DWORD,void*,DWORD,DWORD,HANDLE));
+API(BOOL,WriteFile,(HANDLE,const void*,DWORD,DWORD*,void*));
+API(BOOL,MoveFileExW,(const WCHAR*,const WCHAR*,DWORD));
+API(BOOL,DeleteFileW,(const WCHAR*));
+API(WCHAR*,GetCommandLineW,(void));
+typedef struct {DWORD cb;WCHAR* lpReserved;WCHAR* lpDesktop;WCHAR* lpTitle;DWORD dwX,dwY,dwXSize,dwYSize,dwXCountChars,dwYCountChars,dwFillAttribute,dwFlags;
+                WORD wShowWindow,cbReserved2;BYTE* lpReserved2;HANDLE hStdInput,hStdOutput,hStdError;} STARTUPINFOW_;
+typedef struct {HANDLE hProcess,hThread;DWORD dwProcessId,dwThreadId;} PROCESS_INFORMATION_;
+API(BOOL,CreateProcessW,(const WCHAR*,WCHAR*,void*,void*,BOOL,DWORD,void*,const WCHAR*,STARTUPINFOW_*,PROCESS_INFORMATION_*));
+typedef HANDLE HMENU;
+API(BOOL,PostMessageW,(HWND,UINT,WPARAM,LPARAM));
+API(HMENU,CreatePopupMenu,(void));
+API(BOOL,AppendMenuW,(HMENU,UINT,ULONG_PTR,const WCHAR*));
+API(BOOL,TrackPopupMenu,(HMENU,UINT,int,int,int,HWND,const RECT*));
+API(BOOL,DestroyMenu,(HMENU));
+typedef HANDLE HKEY;
+API(LONG,RegOpenKeyExW,(HKEY,const WCHAR*,DWORD,DWORD,HKEY*));
+API(LONG,RegCreateKeyExW,(HKEY,const WCHAR*,DWORD,WCHAR*,DWORD,DWORD,void*,HKEY*,DWORD*));
+API(LONG,RegQueryValueExW,(HKEY,const WCHAR*,DWORD*,DWORD*,BYTE*,DWORD*));
+API(LONG,RegSetValueExW,(HKEY,const WCHAR*,DWORD,DWORD,const BYTE*,DWORD));
+API(LONG,RegDeleteValueW,(HKEY,const WCHAR*));
+API(LONG,RegCloseKey,(HKEY));
+typedef void* HINTERNET;
+API(HINTERNET,WinHttpOpen,(const WCHAR*,DWORD,const WCHAR*,const WCHAR*,DWORD));
+API(HINTERNET,WinHttpConnect,(HINTERNET,const WCHAR*,WORD,DWORD));
+API(HINTERNET,WinHttpOpenRequest,(HINTERNET,const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR**,DWORD));
+API(BOOL,WinHttpSendRequest,(HINTERNET,const WCHAR*,DWORD,void*,DWORD,DWORD,ULONG_PTR));
+API(BOOL,WinHttpReceiveResponse,(HINTERNET,void*));
+API(BOOL,WinHttpQueryHeaders,(HINTERNET,DWORD,const WCHAR*,void*,DWORD*,DWORD*));
+API(BOOL,WinHttpReadData,(HINTERNET,void*,DWORD,DWORD*));
+API(BOOL,WinHttpSetTimeouts,(HINTERNET,int,int,int,int));
+API(BOOL,WinHttpCloseHandle,(HINTERNET));
+#define HKEY_CURRENT_USER ((HKEY)(ULONG_PTR)((LONG)0x80000001)) /* sign-extended on x64 */
+#define KEY_QUERY_VALUE 0x0001u
+#define KEY_SET_VALUE 0x0002u
+#define REG_SZ 1u
+#define GENERIC_WRITE 0x40000000u
+#define CREATE_ALWAYS 2u
+#define FILE_ATTRIBUTE_NORMAL 0x80u
+#define INVALID_HANDLE ((HANDLE)(LONG_PTR)-1)
+#define MOVEFILE_REPLACE_EXISTING 0x1u
+#define MOVEFILE_WRITE_THROUGH 0x8u
+#define MF_STRING 0x0u
+#define MF_GRAYED 0x1u
+#define MF_CHECKED 0x8u
+#define MF_SEPARATOR 0x800u
+#define TPM_RIGHTALIGN 0x8u
+#define TPM_RETURNCMD 0x100u
+#define WM_APP 0x8000u
+#define WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY 4u
+#define WINHTTP_FLAG_SECURE 0x00800000u
+#define WINHTTP_QUERY_STATUS_CODE 19u
+#define WINHTTP_QUERY_FLAG_NUMBER 0x20000000u
 
 #define WS_OVERLAPPEDWINDOW 0x00CF0000u
 #define WS_VISIBLE 0x10000000u
@@ -325,6 +382,29 @@ typedef struct {UINT cbSize,fMask;int nMin,nMax;UINT nPage;int nPos,nTrackPos;} 
 #define ID_BEGIN_AFTER_EXTEND 231
 #define ID_DISPLAY_SETTLE 232
 #define ID_STARTUP_CHECK 233
+#define ID_MENU 141          /* header button with the options menu */
+#define ID_M_AUTOSTART 150   /* its items */
+#define ID_M_CHECKUPD 151
+#define ID_M_CHECKNOW 152
+#define ID_UPDATE_CHECK 237  /* timer: the check at startup */
+#define ID_UPDATE_WAIT 238   /* timer: an update waits for the projection to stop */
+#define WM_UPDATE_CHECKED (WM_APP+1) /* worker thread -> window: wParam = UPD_* */
+#define WM_UPDATE_FETCHED (WM_APP+2) /* worker thread -> window: wParam = DL_* */
+#define APP_VERSION L"2.3"   /* release tags are v<APP_VERSION>: the release workflow checks it */
+#define REPO_PATH L"/repos/cmmendel/ProjectorScaler/releases/latest"
+#define RELEASES_PAGE L"https://github.com/cmmendel/ProjectorScaler/releases/latest"
+#define ASSET_NAME "ProjectorScalerPortable.exe"
+#ifndef UPD_TEST_PORT        /* -DUPD_TEST_PORT=n: a test build that asks plain HTTP on 127.0.0.1:n instead */
+#define API_HOST L"api.github.com"
+#define DL_HOST L"github.com"
+#define UPD_PORT 443
+#define UPD_FLAGS WINHTTP_FLAG_SECURE
+#else
+#define API_HOST L"127.0.0.1"
+#define DL_HOST L"127.0.0.1"
+#define UPD_PORT UPD_TEST_PORT
+#define UPD_FLAGS 0u
+#endif
 #define RGB3(r,g,b) ((DWORD)((r)|((g)<<8)|((b)<<16)))
 
 /* Layout is written at 96 DPI and scaled per monitor (per-monitor-v2 awareness). */
@@ -1258,7 +1338,8 @@ static void buildDate(WCHAR* out,int cap){
 }
 static void creditTail(WCHAR* out,int cap){
     WCHAR date[32];buildDate(date,32);out[0]=0;
-    appendw(out,L("  ·  compilado el ","  ·  built on "),cap);appendw(out,date,cap);
+    appendw(out,W("  ·  v"),cap);appendw(out,(const WCHAR*)APP_VERSION,cap);
+    appendw(out,L(", compilada el ",", built on "),cap);appendw(out,date,cap);
 }
 /* Small centred footer: "Desarrollado con Claude Code para <Colegio Mayor Mendel> · compilado el ...",
  * the college's name underlined and clickable. Remembers where the link was drawn. */
@@ -1295,11 +1376,14 @@ static void refreshRunState(void){
     if(g_hintLbl)SetWindowTextW(g_hintLbl,hotkeyHint());
     if(g_status&&g_statusText[0])SetWindowTextW(g_status,g_statusText);
 }
+static HWND g_menuBtn;
 static void createHeader(void){
-    ctrl(W("BUTTON"),L("Básico","Basic"),WS_TABSTOP|BS_OWNERDRAW,452,18,104,32,ID_UI_BASIC);
-    ctrl(W("BUTTON"),L("Avanzado","Advanced"),WS_TABSTOP|BS_OWNERDRAW,556,18,104,32,ID_UI_ADV);
-    ctrl(W("BUTTON"),W("ES"),WS_TABSTOP|BS_OWNERDRAW,676,18,40,32,ID_LANG_ES);
-    ctrl(W("BUTTON"),W("EN"),WS_TABSTOP|BS_OWNERDRAW,716,18,40,32,ID_LANG_EN);
+    ctrl(W("BUTTON"),L("Básico","Basic"),WS_TABSTOP|BS_OWNERDRAW,404,18,104,32,ID_UI_BASIC);
+    ctrl(W("BUTTON"),L("Avanzado","Advanced"),WS_TABSTOP|BS_OWNERDRAW,508,18,104,32,ID_UI_ADV);
+    ctrl(W("BUTTON"),W("ES"),WS_TABSTOP|BS_OWNERDRAW,628,18,40,32,ID_LANG_ES);
+    ctrl(W("BUTTON"),W("EN"),WS_TABSTOP|BS_OWNERDRAW,668,18,40,32,ID_LANG_EN);
+    /* Drawn as a gear; the text is for screen readers. */
+    g_menuBtn=ctrl(W("BUTTON"),L("Opciones","Options"),WS_TABSTOP|BS_OWNERDRAW,716,18,40,32,ID_MENU);
 }
 static void createBasic(void){
     section(L("LO QUE SE VE EN EL PROYECTOR","WHAT THE PROJECTOR SHOWS"),40,90,690);
@@ -1311,8 +1395,9 @@ static void createBasic(void){
     g_sizeLbl=ctrl(W("STATIC"),W(""),SS_LEFT,484,268,253,24,ID_SIZE);
     button(L("Centrar","Centre"),ID_CENTER,484,302,253);
     button(L("Ocupar todo","Fill screen"),ID_FILL,484,346,253);
-    g_start=ctrl(W("BUTTON"),startLabel(0),WS_TABSTOP|BS_OWNERDRAW,40,436,330,44,ID_START);
-    g_hintLbl=ctrl(W("STATIC"),W(""),SS_LEFT,390,447,347,24,0);setFontKind(g_hintLbl,FONT_TINY);
+    g_start=ctrl(W("BUTTON"),startLabel(0),WS_TABSTOP|BS_OWNERDRAW,40,436,250,44,ID_START);
+    g_black=ctrl(W("BUTTON"),L("Pantalla negra","Black screen"),WS_TABSTOP|BS_OWNERDRAW,300,436,190,44,ID_BLACK);
+    g_hintLbl=ctrl(W("STATIC"),W(""),SS_LEFT,504,437,233,44,0);setFontKind(g_hintLbl,FONT_TINY); /* two lines */
     g_status=ctrl(W("STATIC"),L("Pulsa Proyectar. Si Windows está en Duplicar, la app pasa un momento a Extender y vuelve a Duplicar al detener.",
                                 "Press Project. If Windows is in Duplicate, the app switches to Extend for the projection and back to Duplicate when it stops."),0,40,486,697,44,ID_STATUS);
     setFontKind(g_status,FONT_TINY);
@@ -1381,7 +1466,7 @@ static void destroyUI(void){
     g_layoutCount=0;
     g_source=g_target=g_zoom=g_x=g_y=g_aspect=g_customW=g_customH=g_fit=g_cursor=0;
     g_apply=g_start=g_black=g_status=g_profile=g_restoreBox=g_modeLabel=0;
-    g_topoBtn=g_editBtn=g_preview=g_sizeLbl=g_hintLbl=0;
+    g_topoBtn=g_editBtn=g_preview=g_sizeLbl=g_hintLbl=g_menuBtn=0;
     KillTimer(g_main,ID_THUMBS);tilesClear();
     g_tilesWnd=g_srcHint=g_tabBtn[0]=g_tabBtn[1]=g_tabBtn[2]=0;
 }
@@ -1871,14 +1956,318 @@ static void tabGuard(void){
     UINT want=took>400?2000:took>150?1000:500;
     if(want!=g_guardMs){g_guardMs=want;SetTimer(g_main,ID_TABGUARD,g_guardMs,0);}
 }
+/* ---- Start with Windows: a value under HKCU\...\Run, written only from the options menu ---- */
+#define RUN_KEY W("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+#define APPROVED_KEY W("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run")
+#define RUN_VALUE W("ProjectorScaler")
+#define PATHCAP 1100
+static WCHAR g_exe[1024];   /* this EXE's full path */
+static int g_autostarted=0; /* started by Windows at sign-in (--autostart) */
+static WCHAR g_runHave[PATHCAP],g_runWant[PATHCAP];
+static void runCommand(WCHAR* out){out[0]=0;appendw(out,W("\""),PATHCAP);appendw(out,g_exe,PATHCAP);appendw(out,W("\" --autostart"),PATHCAP);}
+static int lowerw(int c){return c>='A'&&c<='Z'?c+32:c;}
+static int eqwi(const WCHAR* a,const WCHAR* b){int i=0;while(a[i]&&b[i]&&lowerw(a[i])==lowerw(b[i]))i++;return a[i]==b[i];}
+/* On only when the value starts this very EXE: the app is portable, an old copy's entry does not count. */
+static int autostartOn(void){
+    HKEY k=0;DWORD type=0,size=(DWORD)sizeof(g_runHave)-(DWORD)sizeof(WCHAR);int on=0;
+    if(RegOpenKeyExW(HKEY_CURRENT_USER,RUN_KEY,0,KEY_QUERY_VALUE,&k)!=0)return 0;
+    if(RegQueryValueExW(k,RUN_VALUE,0,&type,(BYTE*)g_runHave,&size)==0&&type==REG_SZ){
+        g_runHave[size/sizeof(WCHAR)]=0;runCommand(g_runWant);on=eqwi(g_runHave,g_runWant);
+    }
+    RegCloseKey(k);
+    if(on&&RegOpenKeyExW(HKEY_CURRENT_USER,APPROVED_KEY,0,KEY_QUERY_VALUE,&k)==0){
+        BYTE flag[16];DWORD fs=sizeof(flag);
+        if(RegQueryValueExW(k,RUN_VALUE,0,0,flag,&fs)==0&&fs>=1&&(flag[0]&1))on=0; /* switched off in Task Manager */
+        RegCloseKey(k);
+    }
+    return on;
+}
+static int setAutostart(int on){
+    HKEY k=0;LONG r;
+    if(on){
+        runCommand(g_runWant);int n=0;while(g_runWant[n])n++;
+        if(RegCreateKeyExW(HKEY_CURRENT_USER,RUN_KEY,0,0,0,KEY_SET_VALUE,0,&k,0)!=0)return 0;
+        r=RegSetValueExW(k,RUN_VALUE,0,REG_SZ,(const BYTE*)g_runWant,(DWORD)((n+1)*sizeof(WCHAR)));RegCloseKey(k);
+        if(r!=0)return 0;
+    }else if(RegOpenKeyExW(HKEY_CURRENT_USER,RUN_KEY,0,KEY_SET_VALUE,&k)==0){
+        r=RegDeleteValueW(k,RUN_VALUE);RegCloseKey(k);
+        if(r!=0&&r!=2)return 0; /* 2: there was none */
+    }
+    /* A switch-off left in Task Manager would keep it from starting: the choice made here wins. */
+    if(RegOpenKeyExW(HKEY_CURRENT_USER,APPROVED_KEY,0,KEY_SET_VALUE,&k)==0){RegDeleteValueW(k,RUN_VALUE);RegCloseKey(k);}
+    return 1;
+}
+static int checkUpdatesOn(void){return GetPrivateProfileIntW(W("Settings"),W("CheckUpdates"),1,g_ini)!=0;}
+
+/* ---- Updates: the latest GitHub release, read and downloaded on a worker thread ----
+ * Nothing is downloaded before the user says yes, and nothing is swapped while projecting. */
+#define UPD_LATEST 0   /* this is the newest version */
+#define UPD_NONE 1     /* no release published yet (404) */
+#define UPD_NEW 2      /* a newer version with the EXE attached */
+#define UPD_NOASSET 3  /* a newer version, its EXE not attached (yet) */
+#define UPD_FAILED 4   /* offline, rate-limited, an answer that does not parse */
+#define DL_OK 0
+#define DL_NET 1
+#define DL_WRITE 2     /* the program folder does not take the new file */
+#define DL_BAD 3       /* what came down is not an x64 EXE */
+#define DL_MAX (32u<<20)
+static int g_updBusy=0,g_updManual=0,g_updRetried=0,g_updWait=0; /* g_updWait: 1 ask, 2 install, once the projection stops */
+static char g_updTag[40];        /* the release tag, only [0-9A-Za-z._-] */
+static WCHAR g_updVersion[40];   /* the tag without its v, for the messages */
+static WCHAR g_newPath[PATHCAP],g_oldPath[PATHCAP];
+static BYTE g_http[65536];       /* the worker thread's read buffer */
+static char g_json[262144];static DWORD g_jsonLen;
+static char g_assetUrl[200];
+static HANDLE g_dlFile;static DWORD g_dlSize;static int g_dlTooBig;static BYTE g_dlHead[512];
+typedef int (*SINK)(const BYTE*,DWORD);
+static void appendc(char* out,const char* s,int cap){int j=0,i=0;while(j<cap-1&&out[j])j++;while(s[i]&&j<cap-1)out[j++]=s[i++];out[j]=0;}
+static int findc(const char* s,DWORD n,const char* sub){
+    for(DWORD i=0;i<n;i++){DWORD j=0;while(sub[j]&&i+j<n&&s[i+j]==sub[j])j++;if(!sub[j])return (int)i;}
+    return -1;
+}
+/* GET https://host/path; the body goes to sink. The HTTP status, -1 on a network error, -2 if sink refused. */
+static int httpGet(const WCHAR* host,const WCHAR* path,const WCHAR* headers,SINK sink){
+    int code=-1;HINTERNET c=0,r=0;
+    HINTERNET s=WinHttpOpen((const WCHAR*)(L"ProjectorScaler/" APP_VERSION),WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,0,0,0);
+    if(!s)return -1;
+    WinHttpSetTimeouts(s,10000,10000,15000,20000);
+    c=WinHttpConnect(s,host,UPD_PORT,0);
+    if(c)r=WinHttpOpenRequest(c,W("GET"),path,0,0,0,UPD_FLAGS);
+    if(r&&WinHttpSendRequest(r,headers,headers?(DWORD)-1:0,0,0,0,0)&&WinHttpReceiveResponse(r,0)){ /* redirects are followed */
+        DWORD st=0,len=sizeof(st);
+        if(WinHttpQueryHeaders(r,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,0,&st,&len,0)){
+            code=(int)st;
+            while(code==200){
+                DWORD got=0;
+                if(!WinHttpReadData(r,g_http,sizeof(g_http),&got)){code=-1;break;}
+                if(!got)break;
+                if(!sink(g_http,got)){code=-2;break;}
+            }
+        }
+    }
+    if(r)WinHttpCloseHandle(r);
+    if(c)WinHttpCloseHandle(c);
+    WinHttpCloseHandle(s);
+    return code;
+}
+static int jsonSink(const BYTE* p,DWORD n){
+    for(DWORD i=0;i<n&&g_jsonLen<sizeof(g_json)-1;i++)g_json[g_jsonLen++]=(char)p[i]; /* the tail (release notes) may be cut */
+    return 1;
+}
+static int fileSink(const BYTE* p,DWORD n){
+    if(g_dlSize+n>DL_MAX){g_dlTooBig=1;return 0;}
+    for(DWORD i=0;i<n&&g_dlSize+i<sizeof(g_dlHead);i++)g_dlHead[g_dlSize+i]=p[i];
+    DWORD put=0;
+    if(!WriteFile(g_dlFile,p,n,&put,0)||put!=n)return 0;
+    g_dlSize+=n;return 1;
+}
+/* "v2.10.1" -> {2,10,1,0}; 0 if it is not a version. */
+static int parseVersion(const WCHAR* s,int* v){
+    int i=0,k=0;
+    for(k=0;k<4;k++)v[k]=0;
+    if(s[0]=='v'||s[0]=='V')i++;
+    for(k=0;k<4;){
+        int n=0,any=0;
+        while(s[i]>='0'&&s[i]<='9'&&n<100000){n=n*10+s[i]-'0';i++;any=1;}
+        if(!any)return 0;
+        v[k++]=n;
+        if(s[i]=='.'&&k<4){i++;continue;}
+        break;
+    }
+    return s[i]==0;
+}
+static int newerThanMine(const WCHAR* tag){
+    int a[4],b[4];
+    if(!parseVersion(tag,a)||!parseVersion((const WCHAR*)APP_VERSION,b))return 0;
+    for(int k=0;k<4;k++)if(a[k]!=b[k])return a[k]>b[k];
+    return 0;
+}
+static DWORD __stdcall checkThread(void* arg){
+    (void)arg;
+    WPARAM result=UPD_FAILED;
+    g_jsonLen=0;g_updTag[0]=0;
+    int code=httpGet((const WCHAR*)API_HOST,(const WCHAR*)REPO_PATH,W("Accept: application/vnd.github+json\r\n"),jsonSink);
+    if(code==404)result=UPD_NONE;
+    else if(code==200){
+        g_json[g_jsonLen]=0;
+        int at=findc(g_json,g_jsonLen,"\"tag_name\""),n=0,closed=0;
+        if(at>=0){
+            DWORD i=(DWORD)at+10;
+            while(i<g_jsonLen&&(g_json[i]==' '||g_json[i]==':'))i++;
+            if(i<g_jsonLen&&g_json[i]=='"')for(i++;i<g_jsonLen&&n<(int)sizeof(g_updTag)-1;i++){
+                char ch=g_json[i];
+                if(ch=='"'){closed=1;break;}
+                if(!((ch>='0'&&ch<='9')||(ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||ch=='.'||ch=='-'||ch=='_'))break;
+                g_updTag[n++]=ch;
+            }
+        }
+        g_updTag[n]=0;
+        if(n&&closed){
+            WCHAR tag[40];int k=0,parsed[4];
+            for(k=0;k<=n;k++)tag[k]=(WCHAR)(BYTE)g_updTag[k];
+            copyw(g_updVersion,tag[0]=='v'||tag[0]=='V'?tag+1:tag,40);
+            if(!parseVersion(tag,parsed))result=UPD_FAILED;
+            else if(!newerThanMine(tag))result=UPD_LATEST;
+            else{
+                /* Only this repository's own asset, under its exact name, is ever downloaded. */
+                g_assetUrl[0]=0;
+                appendc(g_assetUrl,"\"https://github.com/cmmendel/ProjectorScaler/releases/download/",200);
+                appendc(g_assetUrl,g_updTag,200);appendc(g_assetUrl,"/" ASSET_NAME "\"",200);
+                result=findc(g_json,g_jsonLen,g_assetUrl)>=0?UPD_NEW:UPD_NOASSET;
+            }
+        }
+    }
+    PostMessageW(g_main,WM_UPDATE_CHECKED,result,0);
+    return 0;
+}
+static int downloadLooksRight(void){
+    if(g_dlSize<32768||g_dlHead[0]!='M'||g_dlHead[1]!='Z')return 0;
+    DWORD pe=(DWORD)g_dlHead[0x3C]|((DWORD)g_dlHead[0x3D]<<8)|((DWORD)g_dlHead[0x3E]<<16)|((DWORD)g_dlHead[0x3F]<<24);
+    if(pe>sizeof(g_dlHead)-6)return 0; /* written so a huge e_lfanew cannot wrap */
+    return g_dlHead[pe]=='P'&&g_dlHead[pe+1]=='E'&&!g_dlHead[pe+2]&&!g_dlHead[pe+3]&&g_dlHead[pe+4]==0x64&&g_dlHead[pe+5]==0x86; /* x64 */
+}
+static DWORD __stdcall fetchThread(void* arg){
+    (void)arg;
+    WPARAM result=DL_NET;
+    g_dlSize=0;g_dlTooBig=0;
+    g_dlFile=CreateFileW(g_newPath,GENERIC_WRITE,0,0,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,0);
+    if(g_dlFile==INVALID_HANDLE){PostMessageW(g_main,WM_UPDATE_FETCHED,DL_WRITE,0);return 0;}
+    static WCHAR path[160];path[0]=0;
+    WCHAR tag[40];int k=0;while(g_updTag[k]&&k<39){tag[k]=(WCHAR)(BYTE)g_updTag[k];k++;}tag[k]=0;
+    appendw(path,W("/cmmendel/ProjectorScaler/releases/download/"),160);appendw(path,tag,160);appendw(path,W("/" ASSET_NAME),160);
+    int code=httpGet((const WCHAR*)DL_HOST,path,0,fileSink);
+    CloseHandle(g_dlFile);g_dlFile=0;
+    if(code==200)result=downloadLooksRight()?DL_OK:DL_BAD;
+    else if(code==-2)result=g_dlTooBig?DL_BAD:DL_WRITE;
+    if(result!=DL_OK)DeleteFileW(g_newPath);
+    PostMessageW(g_main,WM_UPDATE_FETCHED,result,0);
+    return 0;
+}
+static int busyProjecting(void){return g_isRunning||g_pending;}
+static void waitForProjection(int what){g_updWait=what;SetTimer(g_main,ID_UPDATE_WAIT,5000,0);}
+static void offerReleasePage(const WCHAR* why){
+    static WCHAR msg[700];msg[0]=0;appendw(msg,why,700);
+    appendw(msg,L("\n\n¿Abrir la página de descargas en el navegador?","\n\nOpen the download page in the browser?"),700);
+    if(MessageBoxW(g_main,msg,L("Actualizar ProjectorScaler","Update ProjectorScaler"),MB_YESNO|MB_ICONWARNING)==IDYES)
+        ShellExecuteW(g_main,W("open"),(const WCHAR*)RELEASES_PAGE,0,0,1);
+}
+static void startCheck(int manual){
+    if(g_updBusy)return;
+    g_updBusy=1;g_updManual=manual;
+    if(manual)status(L("Buscando actualizaciones...","Checking for updates..."));
+    HANDLE t=CreateThread(0,0,checkThread,0,0,0);
+    if(t)CloseHandle(t);
+    else{g_updBusy=0;g_updManual=0;if(manual)status(L("No se pudo buscar actualizaciones.","Could not check for updates."));}
+}
+static void startFetch(void){
+    static WCHAR line[200];line[0]=0;
+    appendw(line,L("Descargando la versión ","Downloading version "),200);appendw(line,g_updVersion,200);appendw(line,W("..."),200);
+    status(line);g_updBusy=1;
+    HANDLE t=CreateThread(0,0,fetchThread,0,0,0);
+    if(t)CloseHandle(t);
+    else{g_updBusy=0;offerReleasePage(L("No se pudo iniciar la descarga.","The download could not start."));}
+}
+static void askToUpdate(void){
+    if(busyProjecting()){waitForProjection(1);return;}
+    static WCHAR msg[700];msg[0]=0;
+    appendw(msg,L("Hay una versión nueva de ProjectorScaler: la ","A new version of ProjectorScaler is out: "),700);appendw(msg,g_updVersion,700);
+    appendw(msg,L(" (tienes la "," (you have "),700);appendw(msg,(const WCHAR*)APP_VERSION,700);appendw(msg,W(")."),700);
+    appendw(msg,L("\n\n¿Descargarla e instalarla ahora? ProjectorScaler se cerrará y volverá a abrirse con la versión nueva. Tus ajustes se conservan.",
+                  "\n\nDownload and install it now? ProjectorScaler will close and open again with the new version. Your settings are kept."),700);
+    if(MessageBoxW(g_main,msg,L("Actualización disponible","Update available"),MB_YESNO|MB_ICONQUESTION)!=IDYES){
+        status(L("Actualización aplazada: se volverá a ofrecer en el próximo inicio.","Update postponed: it will be offered again at the next start."));
+        return;
+    }
+    startFetch();
+}
+/* A running EXE can be renamed but not overwritten: this copy steps aside as .old,
+ * the download takes its name, the new copy starts and this one closes. */
+static void installUpdate(void){
+    if(busyProjecting()){
+        status(L("La versión nueva está descargada: se instalará al detener la proyección.","The new version is downloaded: it will be installed when the projection stops."));
+        waitForProjection(2);return;
+    }
+    DeleteFileW(g_oldPath);
+    if(!MoveFileExW(g_exe,g_oldPath,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){
+        DeleteFileW(g_newPath);status(L("Actualización cancelada.","Update cancelled."));
+        offerReleasePage(L("No se pudo sustituir el programa: la carpeta no admite cambios.","The program could not be replaced: its folder does not allow changes."));return;
+    }
+    if(!MoveFileExW(g_newPath,g_exe,MOVEFILE_WRITE_THROUGH)){
+        MoveFileExW(g_oldPath,g_exe,MOVEFILE_WRITE_THROUGH);DeleteFileW(g_newPath);status(L("Actualización cancelada.","Update cancelled."));
+        offerReleasePage(L("No se pudo colocar la versión nueva en la carpeta del programa.","The new version could not be put in the program folder."));return;
+    }
+    UnregisterHotKey(g_main,ID_EMERGENCY); /* the new copy registers the emergency key itself */
+    /* CreateProcess, not ShellExecute: ShellExecute may hand the launch to a thread that dies with this process. */
+    static WCHAR cmd[PATHCAP];cmd[0]=0;appendw(cmd,W("\""),PATHCAP);appendw(cmd,g_exe,PATHCAP);appendw(cmd,W("\""),PATHCAP);
+    STARTUPINFOW_ si={0};si.cb=sizeof(si);PROCESS_INFORMATION_ pi={0};
+    if(CreateProcessW(g_exe,cmd,0,0,0,0,0,0,&si,&pi)){CloseHandle(pi.hThread);CloseHandle(pi.hProcess);}
+    else MessageBoxW(g_main,L("ProjectorScaler se ha actualizado. Ábrelo de nuevo.","ProjectorScaler has been updated. Open it again."),W("ProjectorScaler"),0x40);
+    DestroyWindow(g_main);
+}
+static void onUpdateChecked(int result){
+    int manual=g_updManual;
+    g_updBusy=0;g_updManual=0;
+    if(result==UPD_NEW){askToUpdate();return;}
+    if(!manual){ /* the check at startup stays silent unless there is something to install */
+        if(result==UPD_FAILED&&!g_updRetried){g_updRetried=1;SetTimer(g_main,ID_UPDATE_CHECK,120000,0);} /* the network may not be up yet */
+        return;
+    }
+    static WCHAR msg[400];msg[0]=0;
+    if(result==UPD_LATEST){
+        appendw(msg,L("Ya tienes la última versión (","You have the latest version ("),400);appendw(msg,(const WCHAR*)APP_VERSION,400);appendw(msg,W(")."),400);
+        status(msg);MessageBoxW(g_main,msg,W("ProjectorScaler"),0x40);
+    }else if(result==UPD_NONE){
+        status(L("Aún no hay versiones publicadas en GitHub.","No version has been published on GitHub yet."));
+        MessageBoxW(g_main,L("Aún no hay versiones publicadas en GitHub.","No version has been published on GitHub yet."),W("ProjectorScaler"),0x40);
+    }else if(result==UPD_NOASSET){
+        appendw(msg,L("La versión ","Version "),400);appendw(msg,g_updVersion,400);
+        appendw(msg,L(" está publicada, pero todavía sin el programa para descargar."," is published, but without the program to download yet."),400);
+        status(msg);offerReleasePage(msg);
+    }else{
+        status(L("No se pudo consultar GitHub.","GitHub could not be reached."));
+        MessageBoxW(g_main,L("No se pudo consultar GitHub. Comprueba la conexión a Internet e inténtalo más tarde.","GitHub could not be reached. Check the Internet connection and try again later."),W("ProjectorScaler"),MB_ICONWARNING);
+    }
+}
+static void onUpdateFetched(int result){
+    g_updBusy=0;
+    if(result==DL_OK){installUpdate();return;}
+    status(L("Actualización cancelada.","Update cancelled."));
+    offerReleasePage(result==DL_WRITE?L("No se pudo guardar la versión nueva junto al programa: la carpeta no admite escritura.","The new version could not be saved next to the program: the folder is read-only."):
+                     result==DL_BAD?L("Lo descargado no es un programa válido y no se ha instalado.","The download is not a valid program and was not installed."):
+                     L("No se pudo descargar la versión nueva.","The new version could not be downloaded."));
+}
+static void showOptionsMenu(void){
+    HMENU m=CreatePopupMenu();
+    if(!m)return;
+    AppendMenuW(m,MF_STRING|(autostartOn()?MF_CHECKED:0),ID_M_AUTOSTART,L("Iniciar con Windows","Start with Windows"));
+    AppendMenuW(m,MF_STRING|(checkUpdatesOn()?MF_CHECKED:0),ID_M_CHECKUPD,L("Buscar actualizaciones al iniciar","Check for updates at startup"));
+    AppendMenuW(m,MF_STRING|(g_updBusy?MF_GRAYED:0),ID_M_CHECKNOW,L("Buscar actualizaciones ahora","Check for updates now"));
+    AppendMenuW(m,MF_SEPARATOR,0,0);
+    AppendMenuW(m,MF_STRING|MF_GRAYED,0,(const WCHAR*)(L"ProjectorScaler " APP_VERSION));
+    RECT r={0,0,0,0};GetWindowRect(g_menuBtn,&r);
+    int cmd=(int)TrackPopupMenu(m,TPM_RIGHTALIGN|TPM_RETURNCMD,(int)r.right,(int)r.bottom,0,g_main,0);
+    DestroyMenu(m);
+    if(cmd==ID_M_AUTOSTART){
+        int on=!autostartOn();
+        if(!setAutostart(on))MessageBoxW(g_main,L("Windows no permitió cambiar el inicio automático.","Windows did not allow changing the automatic start."),W("ProjectorScaler"),MB_ICONWARNING);
+        else status(on?L("ProjectorScaler se abrirá al iniciar sesión en Windows.","ProjectorScaler will open when you sign in to Windows."):
+                       L("ProjectorScaler ya no se abrirá al iniciar sesión.","ProjectorScaler will no longer open when you sign in."));
+    }else if(cmd==ID_M_CHECKUPD){
+        int on=!checkUpdatesOn();
+        g_iniError=0;writeOne(W("Settings"),W("CheckUpdates"),on);
+        if(g_iniError)status(iniErrorText());
+        else status(on?L("Se buscarán actualizaciones en GitHub al iniciar.","Updates will be checked on GitHub at startup."):
+                       L("Ya no se buscarán actualizaciones al iniciar.","Updates will no longer be checked at startup."));
+    }else if(cmd==ID_M_CHECKNOW)startCheck(1);
+}
 static void paintMain(HWND hwnd){
     PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);RECT r={0};GetClientRect(hwnd,&r);
     FillRect(dc,&r,g_brWindow);
     RECT banner={0,0,r.right,S(68)};HBRUSH navy=CreateSolidBrush(RGB3(25,48,77));FillRect(dc,&banner,navy);DeleteObject(navy);
     SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB3(255,255,255));
     HGDIOBJ oldFont=SelectObject(dc,g_fontHeader);
-    RECT hdr={S(40),S(5),S(440),S(45)};DrawTextW(dc,W("ProjectorScaler"),-1,&hdr,0);
-    SelectObject(dc,g_fontTiny);RECT subtitle={S(42),S(44),S(440),S(65)};SetTextColor(dc,RGB3(200,222,240));
+    RECT hdr={S(40),S(5),S(396),S(45)};DrawTextW(dc,W("ProjectorScaler"),-1,&hdr,0);
+    SelectObject(dc,g_fontTiny);RECT subtitle={S(42),S(44),S(396),S(65)};SetTextColor(dc,RGB3(200,222,240));
     DrawTextW(dc,L("Control de proyección · Windows 10/11 · Portátil","Projection control · Windows 10/11 · Portable"),-1,&subtitle,0);
     if(g_uiMode==0){
         paintCard(dc,20,80,737,330);paintCard(dc,20,420,737,116);
@@ -1896,7 +2285,7 @@ static void paintMain(HWND hwnd){
     SelectObject(dc,oldFont);
     EndPaint(hwnd,&ps);
 }
-static int isHeaderButton(int id){return id==ID_UI_BASIC||id==ID_UI_ADV||id==ID_LANG_ES||id==ID_LANG_EN;}
+static int isHeaderButton(int id){return id==ID_UI_BASIC||id==ID_UI_ADV||id==ID_LANG_ES||id==ID_LANG_EN||id==ID_MENU;}
 static void drawButton(const void* data){
     typedef struct {UINT CtlType;UINT CtlID;UINT itemID;UINT itemAction;UINT itemState;HWND hwndItem;HDC hDC;RECT rcItem;ULONG_PTR itemData;} DRAWITEM;
     const DRAWITEM* d=(const DRAWITEM*)data;
@@ -1923,9 +2312,11 @@ static void drawButton(const void* data){
     RoundRect(d->hDC,d->rcItem.left,d->rcItem.top,d->rcItem.right,d->rcItem.bottom,11,11);
     SelectObject(d->hDC,oldPen);SelectObject(d->hDC,old);DeleteObject(brush);
     RECT r=d->rcItem;WCHAR label[128]={0};GetWindowTextW(d->hwndItem,label,128);
-    HGDIOBJ oldFont=SelectObject(d->hDC,g_fontUi);SetBkMode(d->hDC,TRANSPARENT);SetTextColor(d->hDC,fg);
+    HFONT gear=0;
+    if(id==ID_MENU){gear=CreateFontW(S(-17),0,0,0,400,0,0,0,1,0,0,0,0,W("Segoe MDL2 Assets"));label[0]=0xE713;label[1]=0;} /* Settings */
+    HGDIOBJ oldFont=SelectObject(d->hDC,gear?gear:g_fontUi);SetBkMode(d->hDC,TRANSPARENT);SetTextColor(d->hDC,fg);
     DrawTextW(d->hDC,label,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
-    SelectObject(d->hDC,oldFont);
+    SelectObject(d->hDC,oldFont);if(gear)DeleteObject(gear);
     if(d->itemState&ODS_FOCUS){RECT f={r.left+S(4),r.top+S(4),r.right-S(4),r.bottom-S(4)};DrawFocusRect(d->hDC,&f);}
 }
 /* ---- Basic-mode preview: the projector, with the frame where the picture lands ---- */
@@ -2112,6 +2503,11 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         fitWindow(hwnd,g_dpi,0);createUI();
         if(g_uiMode==0)SetTimer(hwnd,ID_PREVIEW_TICK,1000,0);
         SetTimer(hwnd,ID_STARTUP_CHECK,400,0);
+        /* Leftovers of the last update, then the check (later at sign-in, when the network may lag). */
+        copyw(g_oldPath,g_exe,PATHCAP);appendw(g_oldPath,W(".old"),PATHCAP);
+        copyw(g_newPath,g_exe,PATHCAP);appendw(g_newPath,W(".new"),PATHCAP);
+        DeleteFileW(g_oldPath);DeleteFileW(g_newPath);
+        SetTimer(hwnd,ID_UPDATE_CHECK,g_autostarted?30000:3000,0);
         return 0;
     case WM_DPICHANGED:
         fitWindow(hwnd,(UINT)(w&0xffff),(const RECT*)l);return 0;
@@ -2141,6 +2537,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         case ID_UI_ADV:setMode(1);break;
         case ID_LANG_ES:setLang(0);break;
         case ID_LANG_EN:setLang(1);break;
+        case ID_MENU:showOptionsMenu();break;
         case ID_CENTER:basicCenter();basicChanged();g_iniError=0;writeBasic();break;
         case ID_FILL:basicFill();basicChanged();g_iniError=0;writeBasic();break;
         case ID_APPLY:applySettings();break;
@@ -2172,6 +2569,19 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         if(w==ID_HIDEIDS){dismissIds();return 0;}
         if(w==ID_THUMBS){thumbStep();return 0;}
         if(w==ID_TABGUARD){tabGuard();return 0;}
+        if(w==ID_UPDATE_CHECK){
+            KillTimer(hwnd,ID_UPDATE_CHECK);
+            DeleteFileW(g_oldPath); /* right after an update the old copy may not have closed by WM_CREATE */
+            if(checkUpdatesOn())startCheck(0);
+            return 0;
+        }
+        if(w==ID_UPDATE_WAIT){
+            if(busyProjecting())return 0;
+            KillTimer(hwnd,ID_UPDATE_WAIT);
+            int what=g_updWait;g_updWait=0;
+            if(what==1)askToUpdate();else if(what==2)installUpdate();
+            return 0;
+        }
         if(w==ID_PREVIEW_TICK){
             /* Keeps the stills of "your screen" roughly current while the basic panel is open. */
             if(g_preview&&!g_pDrag)InvalidateRect(g_preview,0,0);
@@ -2242,6 +2652,8 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
             ShellExecuteW(hwnd,W("open"),W("https://cmmendel.com"),0,0,1);
         return 0;
     }
+    case WM_UPDATE_CHECKED:onUpdateChecked((int)w);return 0;
+    case WM_UPDATE_FETCHED:onUpdateFetched((int)w);return 0;
     case WM_PAINT:paintMain(hwnd);return 0;
     case WM_ERASEBKGND:return 1;
     case WM_DRAWITEM:drawButton((const void*)l);return 1;
@@ -2272,6 +2684,8 @@ void mainCRTStartup(void){
         MessageBoxW(0,L("La ruta de la carpeta del programa es demasiado larga. Mueve ProjectorScaler a una carpeta más corta.","The program folder path is too long. Move ProjectorScaler to a shorter folder."),W("ProjectorScaler"),0x10);
         ExitProcess(4);
     }
+    copyw(g_exe,g_ini,(int)SIZEOF(g_exe)); /* still the EXE's path here */
+    g_autostarted=findw(GetCommandLineW(),W("--autostart"))>=0;
     {int i=0;while(iniName[i]){g_ini[cut+1+i]=iniName[i];i++;}g_ini[cut+1+i]=0;}
     {   /* Language: the saved choice, else Spanish on a Spanish Windows and English elsewhere. */
         int lang=(int)GetPrivateProfileIntW(W("Settings"),W("Language"),-1,g_ini);
@@ -2292,7 +2706,7 @@ void mainCRTStartup(void){
     if(!RegisterClassExW(&pv)){ExitProcess(3);}
     WNDCLASSEXW tc={0};tc.cbSize=sizeof(tc);tc.lpfnWndProc=tilesProc;tc.hInstance=g_inst;tc.hCursor=LoadCursorW(0,IDC_HAND);tc.lpszClassName=W("ProjectorScalerTiles");
     if(!RegisterClassExW(&tc)){ExitProcess(3);}
-    HWND h=CreateWindowExW(0,W("ProjectorScalerMain"),W("ProjectorScaler 2.2"),WS_OVERLAPPEDWINDOW|WS_VISIBLE,120,18,780,748,0,0,g_inst,0);
+    HWND h=CreateWindowExW(0,W("ProjectorScalerMain"),(const WCHAR*)(L"ProjectorScaler " APP_VERSION),WS_OVERLAPPEDWINDOW|WS_VISIBLE,120,18,780,748,0,0,g_inst,0);
     if(!h){MessageBoxW(0,L("No se pudo iniciar ProjectorScaler.","ProjectorScaler could not start."),W("Error"),0x10);ExitProcess(3);}
     ShowWindow(h,SW_SHOW);UpdateWindow(h);
     /* The emergency stop is the only way back if the output ever covers the panel:
