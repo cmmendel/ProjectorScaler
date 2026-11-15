@@ -114,6 +114,16 @@ API(BOOL,IsIconic,(HWND));
 API(BOOL,PrintWindow,(HWND,HDC,UINT));
 API(int,SetScrollInfo,(HWND,int,const void*,BOOL));
 API(HWND,SetFocus,(HWND));
+API(int,GetClassNameW,(HWND,WCHAR*,int));
+API(DWORD,GetWindowThreadProcessId,(HWND,DWORD*));
+API(BOOL,IsHungAppWindow,(HWND));
+API(HANDLE,OpenProcess,(DWORD,BOOL,DWORD));
+API(BOOL,QueryFullProcessImageNameW,(HANDLE,DWORD,WCHAR*,DWORD*));
+API(BOOL,CloseHandle,(HANDLE));
+API(void,Sleep,(DWORD));
+API(LONG,CoInitializeEx,(void*,DWORD));
+API(LONG,CoCreateInstance,(const void*,void*,DWORD,const void*,void**));
+API(void,SysFreeString,(WCHAR*));
 IN(HANDLE __stdcall ShellExecuteW(HWND,const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR*,int));
 API(BOOL,ClientToScreen,(HWND,POINT*));
 /* dwmapi */
@@ -302,6 +312,7 @@ typedef struct {UINT cbSize,fMask;int nMin,nMax;UINT nPage;int nPos,nTrackPos;} 
 #define ID_TILES 139
 #define ID_SRCHINT 140
 #define ID_THUMBS 235
+#define ID_TABGUARD 236
 #define ID_PREVIEW_TICK 234
 #define ID_HIDEIDS 230
 #define ID_BEGIN_AFTER_EXTEND 231
@@ -383,6 +394,12 @@ static int g_tileCount=0,g_thumbNext=0,g_tileScroll=0,g_tileTab=0,g_tabCount=-1;
 static int g_srcKind=TILE_SCREEN; /* what g_srcWindow is when it is set: a window or a browser tab */
 static HWND g_tilesWnd,g_tabBtn[3],g_srcHint;
 static WCHAR g_srcTabTitle[128];
+static RECT g_tabCrop;      /* the chosen tab's page, in its browser window's client coordinates */
+static int g_tabFrozen=0;   /* the chosen tab is not confirmed on show: keep the last picture */
+static WCHAR g_tabExpect[256]; /* the browser's title when the tab was last confirmed */
+static HDC g_tabDC;static HBITMAP g_tabBmp;static HGDIOBJ g_tabOld;static int g_tabBw,g_tabBh;
+static void* g_tabSel; /* the chosen tab's SelectionItem pattern (UI Automation) */
+static void tabRelease(void);
 static RECT g_linkRect; /* "Colegio Mayor Mendel" in the footer, a link to cmmendel.com */
 static int g_overLink=0;
 static const WCHAR* g_tabError=0; /* why the Pestañas tab is empty, when it is not just "no tabs" */
@@ -626,7 +643,13 @@ static void loadSavedMonitors(void){
     if(g_sourceIndex==g_targetIndex && g_monitorCount>1)g_targetIndex=(g_sourceIndex+1)%g_monitorCount;
     comboselect(g_source,g_sourceIndex);comboselect(g_target,g_targetIndex);
 }
+static void freeTabScratch(void){
+    if(g_tabDC){SelectObject(g_tabDC,g_tabOld);DeleteDC(g_tabDC);g_tabDC=0;}
+    if(g_tabBmp){DeleteObject(g_tabBmp);g_tabBmp=0;}
+    g_tabBw=g_tabBh=0;
+}
 static void clearRender(void){
+    freeTabScratch();
     if(g_capDC){if(g_capOld)SelectObject(g_capDC,g_capOld);if(g_capBmp)DeleteObject(g_capBmp);DeleteDC(g_capDC);}
     if(g_bufDC){if(g_bufOld)SelectObject(g_bufDC,g_bufOld);if(g_bufBmp)DeleteObject(g_bufBmp);DeleteDC(g_bufDC);}
     g_capDC=g_bufDC=0;g_capBmp=g_bufBmp=0;g_capOld=g_bufOld=0;
@@ -692,12 +715,41 @@ static int ensureCaptureSize(int w,int h){
 /* One window: PrintWindow asks the window to draw itself, so it works even when other
  * windows cover it; if the window refuses, copy its area from the screen instead.
  * A minimised window keeps its last frame; a closed one keeps it and says so once. */
+/* Fail closed: no confirmed tab, or a browser title that changed since the guard last
+ * confirmed the tab, keeps the last picture until the guard confirms it again. */
+static void captureTab(void){
+    if(!g_tabSel||g_tabFrozen)return;
+    WCHAR now[256];GetWindowTextW(g_srcWindow,now,256);
+    if(!eqw(now,g_tabExpect)){g_tabFrozen=1;return;}
+    RECT cr={0};GetClientRect(g_srcWindow,&cr);int w=(int)cr.right,h=(int)cr.bottom;
+    RECT c=g_tabCrop;
+    if(c.right>cr.right)c.right=cr.right;
+    if(c.bottom>cr.bottom)c.bottom=cr.bottom;
+    int cw=(int)(c.right-c.left),ch=(int)(c.bottom-c.top);
+    if(w<2||h<2||cw<2||ch<2)return;
+    if(w!=g_tabBw||h!=g_tabBh){
+        freeTabScratch();
+        HDC screen=GetDC(0);if(!screen)return;
+        g_tabDC=CreateCompatibleDC(screen);g_tabBmp=CreateCompatibleBitmap(screen,w,h);ReleaseDC(0,screen);
+        if(!g_tabDC||!g_tabBmp){freeTabScratch();return;}
+        g_tabOld=SelectObject(g_tabDC,g_tabBmp);g_tabBw=w;g_tabBh=h;
+    }
+    /* No copy from the screen here: whatever covers the browser would be projected. */
+    if(!PrintWindow(g_srcWindow,g_tabDC,PW_CLIENTONLY|PW_RENDERFULLCONTENT))return;
+    GetWindowTextW(g_srcWindow,now,256);
+    if(!eqw(now,g_tabExpect)){g_tabFrozen=1;return;}
+    if(!ensureCaptureSize(cw,ch))return;
+    BitBlt(g_capDC,0,0,cw,ch,g_tabDC,(int)c.left,(int)c.top,SRCCOPY);
+    POINT o={0,0};ClientToScreen(g_srcWindow,&o);
+    drawCursorOnCapture((int)o.x+(int)c.left,(int)o.y+(int)c.top,cw,ch);
+}
 static void captureWindow(void){
     if(!IsWindow(g_srcWindow)){
         if(!g_srcLost){g_srcLost=1;status(L("La ventana proyectada se ha cerrado: se mantiene la última imagen. Elige otro origen.","The projected window was closed: the last picture stays. Choose another source."));}
         return;
     }
     if(IsIconic(g_srcWindow))return;
+    if(g_srcKind==TILE_TAB){captureTab();return;}
     RECT cr={0};GetClientRect(g_srcWindow,&cr);
     int w=(int)cr.right,h=(int)cr.bottom;
     if(w<2||h<2||!ensureCaptureSize(w,h))return;
@@ -813,7 +865,7 @@ static void restoreIfNeeded(void){
  * screen's proportions, so what the preview shows is exactly where the picture lands. */
 static int basicSourceIndex(void){int c=controllingIndex();return c<0?primaryIndex():c;}
 static int basicTargetIndex(void){int s=basicSourceIndex();for(int i=0;i<g_monitorCount;i++)if(i!=s)return i;return s;}
-static void basicSelect(void){g_srcWindow=0;g_sourceIndex=basicSourceIndex();g_targetIndex=basicTargetIndex();}
+static void basicSelect(void){g_srcWindow=0;g_srcKind=TILE_SCREEN;g_sourceIndex=basicSourceIndex();g_targetIndex=basicTargetIndex();}
 /* In DUPLICATE only one desktop is listed, so the projector is assumed to have the
  * screen's shape until EXTEND reveals it; startOutput() re-derives the frame then. */
 static void basicSizes(double* sa,double* tw,double* th){
@@ -893,6 +945,9 @@ static int startOutput(void){
         RECT cr={0};GetClientRect(g_srcWindow,&cr);
         g_sw=(int)cr.right;g_sh=(int)cr.bottom;
         if(IsIconic(g_srcWindow)||g_sw<2||g_sh<2){g_sw=1280;g_sh=720;}
+        if(g_srcKind==TILE_TAB&&g_tabCrop.right-g_tabCrop.left>=16&&g_tabCrop.bottom-g_tabCrop.top>=16){
+            g_sw=(int)(g_tabCrop.right-g_tabCrop.left);g_sh=(int)(g_tabCrop.bottom-g_tabCrop.top);
+        }
     }
     g_srcLost=0;
     g_tw=(int)(t.right-t.left);g_th=(int)(t.bottom-t.top);g_tOrgX=(int)t.left;g_tOrgY=(int)t.top;
@@ -1391,7 +1446,8 @@ static void selectTile(int i){
         status(L("Esa ventana ya no existe: lista actualizada.","That window no longer exists: list refreshed."));fillTiles();return;
     }
     WCHAR title[128];copyw(title,t->title,128);
-    if(t->kind==TILE_TAB&&!tabActivate(t)){fillTiles();return;} /* tabActivate says why */
+    if(t->kind!=TILE_TAB)tabRelease();
+    else if(!tabActivate(t)){fillTiles();return;} /* tabActivate says why */
     g_srcKind=t->kind;
     if(t->kind==TILE_SCREEN){g_srcWindow=0;g_sourceIndex=t->mon;}
     else g_srcWindow=t->hwnd;
@@ -1445,7 +1501,7 @@ static LRESULT __stdcall tilesProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
                         SelectObject(tdc,to);DeleteDC(tdc);
                     }
                 }else{
-                    const WCHAR* ph=!t->thumbDone?W("…"):t->kind==TILE_TAB?L("Pestaña en segundo plano","Background tab"):L("Sin vista previa","No preview");
+                    const WCHAR* ph=!t->thumbDone?W("…"):t->kind==TILE_TAB?L("En segundo plano","In background"):L("Sin vista previa","No preview");
                     drawTextIn(mem,ph,ax,ay,ax+aw,ay+ah,g_fontTiny,RGB3(96,110,128),DT_CENTER|DT_VCENTER|DT_SINGLELINE);
                 }
                 drawTextIn(mem,t->title,x+S(7),y+th+S(4),x+tw-S(7),y+th+S(24),g_fontTiny,RGB3(25,48,77),DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
@@ -1482,9 +1538,237 @@ static LRESULT __stdcall tilesProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     }
     return DefWindowProcW(hwnd,msg,w,l);
 }
-/* Stage B placeholder: the Pestañas tab lists nothing until the UI Automation code lands. */
-static void tabsPopulate(void){g_tabCount=0;}
-static int tabActivate(TILE* t){(void)t;return 0;}
+/* ---- Browser tabs (Chrome, Edge) through UI Automation ----
+ * The tab strip of a Chromium browser exposes each tab as a TabItem with a SelectionItem
+ * pattern, and the page on show as a Document element. Choosing a tab selects it, and the
+ * projection is the browser window cropped to that Document. The chosen TabItem element is
+ * kept: it is the tab's identity, and the guard asks it every half second whether it is still
+ * the selected tab. Anything that cannot be confirmed freezes the picture (fail closed). */
+typedef struct {DWORD a;WORD b,c;BYTE d[8];} GUID_;
+typedef struct {WORD vt,r1,r2,r3;LONG lVal;LONG pad1;void* pad2;} VARIANT_; /* 24 bytes on x64 */
+static const GUID_ CLSID_CUIAutomation_={0xff48dba4,0x60ef,0x4201,{0xaa,0x87,0x54,0x10,0x3e,0xef,0x59,0x4e}};
+static const GUID_ IID_IUIAutomation_={0x30cbe57d,0xd9d0,0x452a,{0xab,0x13,0x7a,0xc5,0xac,0x48,0x25,0xee}};
+static const GUID_ IID_SelectionItem_={0xa8efa66a,0x0fda,0x421a,{0x91,0x94,0x38,0x02,0x1f,0x35,0x78,0xea}};
+#define VTBL(o) (*(void***)(o))
+#define UIA_CONTROLTYPE 30003
+#define UIA_TABITEM 50019
+#define UIA_DOCUMENT 50030
+#define UIA_SELECTIONITEM 10010
+#define SCOPE_DESCENDANTS 4
+typedef unsigned long (__stdcall *ReleaseFn)(void*);
+typedef LONG (__stdcall *FromHandleFn)(void*,HWND,void**);
+typedef LONG (__stdcall *PropCondFn)(void*,int,VARIANT_,void**);
+typedef LONG (__stdcall *FindAllFn)(void*,int,void*,void**);
+typedef LONG (__stdcall *PatternAsFn)(void*,int,const GUID_*,void**);
+typedef LONG (__stdcall *NameFn)(void*,WCHAR**);
+typedef LONG (__stdcall *RectFn)(void*,RECT*);
+typedef LONG (__stdcall *BoolFn)(void*,BOOL*);
+typedef LONG (__stdcall *LengthFn)(void*,int*);
+typedef LONG (__stdcall *GetElemFn)(void*,int,void**);
+typedef LONG (__stdcall *SelectFn)(void*);
+static void* g_uia;
+static void* g_condTab;
+static void* g_condDoc;
+static void* g_tabElem;   /* the chosen TabItem */
+static void* g_tabWinElem;/* the browser window, to look for the page again */
+static void* g_tabDoc;    /* the page on show */
+static UINT g_guardMs=500;
+static int g_tabLostShown=0;
+
+static void comRelease(void** p){if(*p){((ReleaseFn)VTBL(*p)[2])(*p);*p=0;}}
+static void tabRelease(void){
+    comRelease(&g_tabDoc);comRelease(&g_tabSel);comRelease(&g_tabElem);comRelease(&g_tabWinElem);
+    if(g_main)KillTimer(g_main,ID_TABGUARD);
+    g_tabFrozen=0;g_tabLostShown=0;g_tabExpect[0]=0;g_srcTabTitle[0]=0;
+}
+static int uiaInit(void){
+    static int tried=0;
+    if(g_uia)return 1;
+    if(tried)return 0;
+    tried=1;
+    LONG hr=CoInitializeEx(0,2); /* COINIT_APARTMENTTHREADED; S_FALSE when already done */
+    if(hr<0&&hr!=(LONG)0x80010106)return 0;
+    if(CoCreateInstance(&CLSID_CUIAutomation_,0,1,&IID_IUIAutomation_,&g_uia)<0||!g_uia){g_uia=0;return 0;}
+    VARIANT_ v;memset(&v,0,sizeof(v));v.vt=3;/* VT_I4 */
+    v.lVal=UIA_TABITEM;((PropCondFn)VTBL(g_uia)[23])(g_uia,UIA_CONTROLTYPE,v,&g_condTab);
+    v.lVal=UIA_DOCUMENT;((PropCondFn)VTBL(g_uia)[23])(g_uia,UIA_CONTROLTYPE,v,&g_condDoc);
+    if(!g_condTab||!g_condDoc){comRelease(&g_condTab);comRelease(&g_condDoc);comRelease(&g_uia);return 0;}
+    return 1;
+}
+/* 1 = Chrome, 2 = Edge, 0 = anything else. Electron apps share Chrome's window class, so the
+ * process image decides. */
+static int browserKind(HWND h){
+    WCHAR cls[40]={0};GetClassNameW(h,cls,40);
+    if(!eqw(cls,W("Chrome_WidgetWin_1")))return 0;
+    DWORD pid=0;GetWindowThreadProcessId(h,&pid);if(!pid)return 0;
+    HANDLE p=OpenProcess(0x1000,0,pid); /* PROCESS_QUERY_LIMITED_INFORMATION */
+    if(!p)return 0;
+    WCHAR path[300]={0};DWORD n=300;int kind=0;
+    if(QueryFullProcessImageNameW(p,0,path,&n)){
+        int i=(int)n;while(i>0&&path[i-1]!='\\')i--;
+        WCHAR exe[40]={0};int j=0;
+        for(;path[i]&&j<39;i++,j++){WCHAR c=path[i];exe[j]=(c>='A'&&c<='Z')?(WCHAR)(c+32):c;}
+        if(eqw(exe,W("chrome.exe")))kind=1;else if(eqw(exe,W("msedge.exe")))kind=2;
+    }
+    CloseHandle(p);
+    return kind;
+}
+static int findw(const WCHAR* s,const WCHAR* sub){
+    for(int i=0;s[i];i++){int j=0;while(sub[j]&&s[i+j]==sub[j])j++;if(!sub[j])return i;}
+    return -1;
+}
+/* Tab names can carry the browser's memory note ("… - Uso de memoria - 20,3 MB"). */
+static void cleanTabName(const WCHAR* raw,WCHAR* out,int cap){
+    copyw(out,raw,cap);
+    const WCHAR* marks[4]={W("Uso de memoria"),W("Memory usage"),W("uso de memoria"),W("memory usage")};
+    int cut=-1;
+    for(int k=0;k<4;k++){int at=findw(out,marks[k]);if(at>=0&&(cut<0||at<cut))cut=at;}
+    if(cut<0)return;
+    int end=cut;
+    while(end>0&&(out[end-1]==' '||out[end-1]=='-'||out[end-1]==':'||out[end-1]==0x2013||out[end-1]==0x2014))end--;
+    if(end>0){out[end]=0;return;}
+    copyw(out,raw,cap); /* the note came first: keep the whole name rather than nothing */
+}
+static int tabName(void* elem,WCHAR* out,int cap){
+    WCHAR* b=0;out[0]=0;
+    if(((NameFn)VTBL(elem)[23])(elem,&b)<0||!b)return 0;
+    cleanTabName(b,out,cap);SysFreeString(b);return out[0]!=0;
+}
+static int isSelectedTab(void* elem){
+    void* sel=0;BOOL on=0;
+    if(((PatternAsFn)VTBL(elem)[14])(elem,UIA_SELECTIONITEM,&IID_SelectionItem_,&sel)<0||!sel)return 0;
+    LONG hr=((BoolFn)VTBL(sel)[6])(sel,&on);comRelease(&sel);
+    return hr>=0&&on;
+}
+/* A screen rectangle into hwnd's client coordinates, clamped to the client area. */
+static int toClient(HWND hwnd,RECT s,RECT* out){
+    POINT o={0,0};ClientToScreen(hwnd,&o);RECT cr={0};GetClientRect(hwnd,&cr);
+    RECT r={s.left-o.x,s.top-o.y,s.right-o.x,s.bottom-o.y};
+    if(r.left<0)r.left=0;
+    if(r.top<0)r.top=0;
+    if(r.right>cr.right)r.right=cr.right;
+    if(r.bottom>cr.bottom)r.bottom=cr.bottom;
+    if(r.right-r.left<16||r.bottom-r.top<16)return 0;
+    *out=r;return 1;
+}
+/* The page on show: the largest on-screen Document under the window. Returns it AddRef'd. */
+static void* findPage(void* winElem,HWND hwnd,RECT* crop){
+    void* arr=0;int n=0;void* best=0;LONG bestArea=0;RECT bestRect={0};
+    if(((FindAllFn)VTBL(winElem)[6])(winElem,SCOPE_DESCENDANTS,g_condDoc,&arr)<0||!arr)return 0;
+    ((LengthFn)VTBL(arr)[3])(arr,&n);
+    for(int i=0;i<n&&i<64;i++){
+        void* e=0;if(((GetElemFn)VTBL(arr)[4])(arr,i,&e)<0||!e)continue;
+        BOOL off=1;RECT r={0};
+        if(((BoolFn)VTBL(e)[38])(e,&off)>=0&&!off&&((RectFn)VTBL(e)[43])(e,&r)>=0){
+            LONG area=(r.right-r.left)*(r.bottom-r.top);
+            if(area>bestArea){comRelease(&best);best=e;e=0;bestArea=area;bestRect=r;}
+        }
+        comRelease(&e);
+    }
+    comRelease(&arr);
+    if(best&&!toClient(hwnd,bestRect,crop))comRelease(&best);
+    return best;
+}
+static void tabsPopulate(void){
+    g_tabCount=0;g_tabError=0;
+    if(!uiaInit()){g_tabError=L("Windows no deja leer las pestañas (UI Automation no disponible).","Windows does not allow reading the tabs (UI Automation unavailable).");return;}
+    for(int w=0;w<g_winCount&&g_tileCount<MAXTILES;w++){
+        HWND h=g_winList[w];int kind=browserKind(h);if(!kind)continue;
+        void* win=0;if(((FromHandleFn)VTBL(g_uia)[6])(g_uia,h,&win)<0||!win)continue;
+        void* arr=0;int n=0;
+        if(((FindAllFn)VTBL(win)[6])(win,SCOPE_DESCENDANTS,g_condTab,&arr)>=0&&arr){
+            ((LengthFn)VTBL(arr)[3])(arr,&n);
+            int iconic=IsIconic(h)!=0;
+            for(int i=0;i<n&&g_tileCount<MAXTILES;i++){
+                void* e=0;if(((GetElemFn)VTBL(arr)[4])(arr,i,&e)<0||!e)continue;
+                TILE* t=&g_tiles[g_tileCount];memset(t,0,sizeof(*t));
+                if(tabName(e,t->title,128)){
+                    t->kind=TILE_TAB;t->hwnd=h;t->mon=i; /* position in the strip */
+                    int on=isSelectedTab(e);
+                    appendw(t->sub,kind==1?W("Chrome"):W("Edge"),64);
+                    if(iconic)appendw(t->sub,L(" · minimizado"," · minimised"),64);
+                    else if(on)appendw(t->sub,L(" · a la vista"," · on show"),64);
+                    /* Only the tab on show has a picture: a background tab would show the other one. */
+                    t->thumbDone=1;
+                    if(on&&!iconic){void* doc=findPage(win,h,&t->crop);if(doc){t->thumbDone=0;comRelease(&doc);}}
+                    g_tileCount++;g_tabCount++;
+                }
+                comRelease(&e);
+            }
+            comRelease(&arr);
+        }
+        comRelease(&win);
+    }
+}
+/* The TabItem for this tile, looked up again: by its place in the strip, else by name. */
+static void* findTabElem(void* win,const TILE* t){
+    void* arr=0;int n=0;void* hit=0;
+    if(((FindAllFn)VTBL(win)[6])(win,SCOPE_DESCENDANTS,g_condTab,&arr)<0||!arr)return 0;
+    ((LengthFn)VTBL(arr)[3])(arr,&n);
+    for(int pass=0;pass<2&&!hit;pass++)
+        for(int i=0;i<n&&!hit;i++){
+            if(pass==0&&i!=t->mon)continue;
+            void* e=0;WCHAR name[128];
+            if(((GetElemFn)VTBL(arr)[4])(arr,i,&e)<0||!e)continue;
+            if(tabName(e,name,128)&&eqw(name,t->title)){hit=e;e=0;}
+            comRelease(&e);
+        }
+    comRelease(&arr);
+    return hit;
+}
+static int tabActivate(TILE* t){
+    tabRelease();
+    if(!uiaInit()){status(L("No se puede elegir la pestaña: UI Automation no disponible.","The tab cannot be chosen: UI Automation unavailable."));return 0;}
+    if(((FromHandleFn)VTBL(g_uia)[6])(g_uia,t->hwnd,&g_tabWinElem)<0||!g_tabWinElem){tabRelease();status(L("No se pudo leer la ventana del navegador.","The browser window could not be read."));return 0;}
+    g_tabElem=findTabElem(g_tabWinElem,t);
+    if(!g_tabElem){tabRelease();status(L("Esa pestaña ya no está abierta: lista actualizada.","That tab is no longer open: list refreshed."));return 0;}
+    if(((PatternAsFn)VTBL(g_tabElem)[14])(g_tabElem,UIA_SELECTIONITEM,&IID_SelectionItem_,&g_tabSel)<0||!g_tabSel){
+        tabRelease();status(L("El navegador no deja elegir esa pestaña.","The browser does not allow choosing that tab."));return 0;
+    }
+    if(IsIconic(t->hwnd))ShowWindow(t->hwnd,4); /* SW_SHOWNOACTIVATE: a minimised browser draws nothing */
+    ((SelectFn)VTBL(g_tabSel)[3])(g_tabSel);
+    RECT crop={0};BOOL on=0;
+    for(int k=0;k<12&&!g_tabDoc;k++){ /* the page can take a moment to come forward */
+        if(((BoolFn)VTBL(g_tabSel)[6])(g_tabSel,&on)>=0&&on)g_tabDoc=findPage(g_tabWinElem,t->hwnd,&crop);
+        if(!g_tabDoc)Sleep(60);
+    }
+    if(!g_tabDoc){tabRelease();status(L("La pestaña no llegó a mostrarse: prueba otra vez.","The tab did not come forward: try again."));return 0;}
+    g_tabCrop=crop;GetWindowTextW(t->hwnd,g_tabExpect,256);
+    copyw(g_srcTabTitle,t->title,128);g_tabFrozen=0;g_tabLostShown=0;g_guardMs=500;
+    SetTimer(g_main,ID_TABGUARD,g_guardMs,0);
+    return 1;
+}
+static void tabFreeze(const WCHAR* why){
+    g_tabFrozen=1;
+    if(!g_tabLostShown){g_tabLostShown=1;status(why);}
+}
+/* Every half second: is the chosen tab still the one on show? The UI thread also serves the
+ * emergency key, so a hung browser is never asked, and slow answers slow the guard down. */
+static void tabGuard(void){
+    if(!(g_srcWindow&&g_srcKind==TILE_TAB&&g_tabSel)){tabRelease();return;}
+    HWND h=g_srcWindow;
+    if(!IsWindow(h)){tabFreeze(L("El navegador se ha cerrado: imagen congelada. Elige otro origen.","The browser was closed: picture frozen. Choose another source."));return;}
+    if(IsHungAppWindow(h)){tabFreeze(L("El navegador no responde: imagen congelada.","The browser is not responding: picture frozen."));return;}
+    DWORD t0=GetTickCount();
+    BOOL on=0;LONG hr=((BoolFn)VTBL(g_tabSel)[6])(g_tabSel,&on);
+    if(hr<0||!on){
+        tabFreeze(L("La pestaña elegida ya no está a la vista: imagen congelada. Vuelve a ella en el navegador o elige otro origen.",
+                    "The chosen tab is no longer on show: picture frozen. Go back to it in the browser or choose another source."));
+    }else{
+        RECT s={0},crop={0};int ok=0;
+        if(g_tabDoc&&((RectFn)VTBL(g_tabDoc)[43])(g_tabDoc,&s)>=0)ok=toClient(h,s,&crop);
+        if(!ok){comRelease(&g_tabDoc);g_tabDoc=findPage(g_tabWinElem,h,&crop);ok=g_tabDoc!=0;}
+        if(!ok)tabFreeze(L("No se encuentra la página de la pestaña: imagen congelada.","The tab's page cannot be found: picture frozen."));
+        else{
+            g_tabCrop=crop;GetWindowTextW(h,g_tabExpect,256);
+            if(g_tabFrozen&&g_tabLostShown)status(L("La pestaña elegida vuelve a estar a la vista: proyección reanudada.","The chosen tab is on show again: projection resumed."));
+            g_tabFrozen=0;g_tabLostShown=0;
+        }
+    }
+    DWORD took=GetTickCount()-t0;
+    UINT want=took>400?2000:took>150?1000:500;
+    if(want!=g_guardMs){g_guardMs=want;SetTimer(g_main,ID_TABGUARD,g_guardMs,0);}
+}
 /* A still of the source screen, letterboxed into (x,y,w,h) on dc. */
 static void drawScreenThumb(HDC dc,int x,int y,int w,int h){
     if(g_monitorCount<1)return;
@@ -1792,6 +2076,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     case WM_TIMER:
         if(w==ID_HIDEIDS){dismissIds();return 0;}
         if(w==ID_THUMBS){thumbStep();return 0;}
+        if(w==ID_TABGUARD){tabGuard();return 0;}
         if(w==ID_PREVIEW_TICK){
             /* Keeps the stills of "your screen" roughly current while the basic panel is open. */
             if(g_preview&&!g_pDrag)InvalidateRect(g_preview,0,0);
@@ -1868,7 +2153,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     case WM_CTLCOLORSTATIC:
         SetBkMode((HDC)w,TRANSPARENT);SetTextColor((HDC)w,RGB3(43,65,91));return (LRESULT)g_brWhite;
     case WM_DESTROY:
-        KillTimer(hwnd,ID_PREVIEW_TICK);KillTimer(hwnd,ID_THUMBS);tilesClear();
+        KillTimer(hwnd,ID_PREVIEW_TICK);KillTimer(hwnd,ID_THUMBS);tilesClear();tabRelease();
         UnregisterHotKey(hwnd,ID_EMERGENCY);dismissIds();stopOutput();restoreIfNeeded();
         if(g_fontUi)DeleteObject(g_fontUi);if(g_fontTitle)DeleteObject(g_fontTitle);if(g_fontHeader)DeleteObject(g_fontHeader);
         if(g_fontTiny)DeleteObject(g_fontTiny);if(g_fontOverlay)DeleteObject(g_fontOverlay);if(g_fontOverlaySmall)DeleteObject(g_fontOverlaySmall);

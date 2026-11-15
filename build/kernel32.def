@@ -9,3 +9,7 @@ EXPORTS
  WritePrivateProfileStringW
  GetTickCount
  GetUserDefaultUILanguage
+ OpenProcess
+ QueryFullProcessImageNameW
+ CloseHandle
+ Sleep

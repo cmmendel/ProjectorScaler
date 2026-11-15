@@ -60,3 +60,6 @@ EXPORTS
  ClientToScreen
  SetScrollInfo
  SetFocus
+ GetClassNameW
+ GetWindowThreadProcessId
+ IsHungAppWindow
