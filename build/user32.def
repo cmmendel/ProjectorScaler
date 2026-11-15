@@ -58,3 +58,5 @@ EXPORTS
  IsIconic
  PrintWindow
  ClientToScreen
+ SetScrollInfo
+ SetFocus
