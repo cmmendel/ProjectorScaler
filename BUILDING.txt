@@ -6,7 +6,7 @@ No CRT, no external packages and no Windows SDK.
 
 ProjectorScalerPortable.c declares every Win32 interface it uses. Import
 libraries are made from the .def files in build/ (kernel32, user32, gdi32,
-dwmapi, shell32, ole32, oleaut32, magnification, advapi32, winhttp), which list only the functions the program
+dwmapi, shell32, ole32, oleaut32, magnification, advapi32, winhttp, d3d11, dxgi), which list only the functions the program
 imports. The DLLs lld-link writes next to them are placeholders used only to
 produce the .lib files; they are never shipped or run. The EXE imports the real
 Windows DLLs.
@@ -19,11 +19,11 @@ llvm-rc on PATH; elsewhere set CLANG, LLD_LINK and RC (see the Windows section).
 
 BY HAND
   cd build
-  for each of kernel32 user32 gdi32 dwmapi shell32 ole32 oleaut32 magnification advapi32 winhttp:
+  for each of kernel32 user32 gdi32 dwmapi shell32 ole32 oleaut32 magnification advapi32 winhttp d3d11 dxgi:
     lld-link /machine:x64 /dll /noentry /def:NAME.def /out:NAME.dll /implib:NAME.lib
   llvm-rc /fo ProjectorScaler.res ../ProjectorScaler.rc
   clang --target=x86_64-pc-windows-msvc -O2 -c -ffreestanding -fno-builtin -Wall -Wextra ../ProjectorScalerPortable.c -o ProjectorScalerPortable.obj
-  lld-link /machine:x64 /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib dwmapi.lib shell32.lib ole32.lib oleaut32.lib magnification.lib advapi32.lib winhttp.lib
+  lld-link /machine:x64 /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib dwmapi.lib shell32.lib ole32.lib oleaut32.lib magnification.lib advapi32.lib winhttp.lib d3d11.lib dxgi.lib
 
 ADDING A WIN32 FUNCTION
 Declare it in ProjectorScalerPortable.c with the API(return,name,(args)) macro
