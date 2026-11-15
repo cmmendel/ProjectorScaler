@@ -102,6 +102,18 @@ API(HCURSOR,SetCursor,(HCURSOR));
 API(HWND,SetCapture,(HWND));
 API(BOOL,ReleaseCapture,(void));
 API(BOOL,GetCursorPos,(POINT*));
+typedef BOOL (__stdcall *WNDENUMPROC)(HWND,LPARAM);
+API(BOOL,EnumWindows,(WNDENUMPROC,LPARAM));
+API(BOOL,IsWindowVisible,(HWND));
+API(int,GetWindowTextLengthW,(HWND));
+API(HWND,GetWindow,(HWND,UINT));
+API(LONG_PTR,GetWindowLongPtrW,(HWND,int));
+API(BOOL,IsWindow,(HWND));
+API(BOOL,IsIconic,(HWND));
+API(BOOL,PrintWindow,(HWND,HDC,UINT));
+API(BOOL,ClientToScreen,(HWND,POINT*));
+/* dwmapi */
+API(LONG,DwmGetWindowAttribute,(HWND,DWORD,void*,DWORD));
 /* gdi32 */
 API(HDC,CreateCompatibleDC,(HDC));
 API(BOOL,DeleteDC,(HDC));
@@ -160,6 +172,14 @@ API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
 #define SM_CYSMICON 50
 #define IDI_APP 1
 #define CURSOR_ID(n) ((const WCHAR*)(ULONG_PTR)(n))
+#define GW_OWNER 4u
+#define GWL_EXSTYLE (-20)
+#define PW_CLIENTONLY 1u
+#define PW_RENDERFULLCONTENT 2u
+#define DWMWA_CLOAKED 14u
+#define CBN_DROPDOWN 7
+#define CB_SETDROPPEDWIDTH 0x0160u
+#define MAXWIN 48
 #define WM_CTLCOLORSTATIC 0x0138u
 #define WM_CTLCOLOREDIT 0x0133u
 #define ODS_DISABLED 0x0004u
@@ -301,6 +321,9 @@ static HWND g_topoBtn,g_editBtn;
 static int g_editFrame=0,g_drag=HIT_NONE,g_dragRect[4],g_tOrgX=0,g_tOrgY=0;
 static POINT g_dragFrom;
 static int g_free[4]={1500,1500,8500,8500}; /* left, top, right, bottom */
+/* Source can be a whole monitor (g_srcWindow == 0) or one window, listed after the monitors. */
+static HWND g_srcWindow=0,g_winList[MAXWIN];
+static int g_winCount=0,g_srcLost=0;
 
 /* No CRT: the compiler may emit calls to these for zeroing and struct copies. */
 void* memset(void* ptr,int c,SIZE_T len){BYTE* p=(BYTE*)ptr;for(SIZE_T i=0;i<len;i++)p[i]=(BYTE)c;return ptr;}
@@ -362,6 +385,44 @@ static void updateModeLabel(void){
         W("Modo actual: una sola pantalla activa"));
     if(g_topoBtn)SetWindowTextW(g_topoBtn,mode==2?W("Pasar a DUPLICAR"):W("Pasar a EXTENDER"));
 }
+static void monitorName(int i,WCHAR* name){
+    RECT r=g_monitors[i].rcMonitor;name[0]=0;
+    appendi(name,i+1,150);appendw(name,W("  |  "),150);
+    appendw(name,(g_monitors[i].dwFlags&MONITORINFOF_PRIMARY)?W("PRINCIPAL"):W("Secundaria"),150);
+    appendw(name,W("  "),150);appendi(name,(int)(r.right-r.left),150);appendw(name,W(" x "),150);appendi(name,(int)(r.bottom-r.top),150);
+    appendw(name,W("  "),150);appendw(name,g_monitors[i].szDevice,150);
+}
+/* Windows a person would call "a window": visible, titled, not owned, not a tool window,
+ * not cloaked by DWM (hidden UWP frames), and not ProjectorScaler itself. */
+static BOOL __stdcall enumWin(HWND h,LPARAM user){
+    (void)user;
+    if(g_winCount>=MAXWIN)return 0;
+    if(h==g_main||h==g_output||!IsWindowVisible(h)||GetWindowTextLengthW(h)<1)return 1;
+    if(GetWindow(h,GW_OWNER))return 1;
+    if(GetWindowLongPtrW(h,GWL_EXSTYLE)&WS_EX_TOOLWINDOW)return 1;
+    DWORD cloaked=0;
+    if(DwmGetWindowAttribute(h,DWMWA_CLOAKED,&cloaked,sizeof(cloaked))==0&&cloaked)return 1;
+    WCHAR t[32];GetWindowTextW(h,t,32);
+    if(eqw(t,W("Program Manager")))return 1;
+    g_winList[g_winCount++]=h;
+    return 1;
+}
+/* Monitors first, then windows in Z order. Keeps the chosen window while its handle lives. */
+static void fillSourceCombo(void){
+    SendMessageW(g_source,CB_RESETCONTENT,0,0);
+    for(int i=0;i<g_monitorCount;i++){WCHAR name[150];monitorName(i,name);add(g_source,name);}
+    g_winCount=0;EnumWindows(enumWin,0);
+    int sel=g_sourceIndex,found=0;
+    for(int i=0;i<g_winCount;i++){
+        WCHAR title[100]={0},line[150]={0};GetWindowTextW(g_winList[i],title,100);
+        appendw(line,W("Ventana  ·  "),150);appendw(line,title,150);
+        if(IsIconic(g_winList[i]))appendw(line,W("  (minimizada)"),150);
+        add(g_source,line);
+        if(g_srcWindow&&g_winList[i]==g_srcWindow){sel=g_monitorCount+i;found=1;}
+    }
+    if(g_srcWindow&&!found)g_srcWindow=0;
+    comboselect(g_source,sel);
+}
 /* Rebuilds both combos, keeping the current g_sourceIndex/g_targetIndex by device name.
  * Returns 1 when both previous choices still exist. A kept choice is never changed here:
  * startOutput() is the one that refuses an unsafe target and tells the user why. */
@@ -371,16 +432,11 @@ static int refreshMonitors(void){
     if(oldCount && g_sourceIndex>=0 && g_sourceIndex<oldCount)copyw(srcName,g_monitors[g_sourceIndex].szDevice,32);
     if(oldCount && g_targetIndex>=0 && g_targetIndex<oldCount)copyw(dstName,g_monitors[g_targetIndex].szDevice,32);
     g_monitorCount=0;EnumDisplayMonitors(0,0,enumMon,0);
-    SendMessageW(g_source,CB_RESETCONTENT,0,0);SendMessageW(g_target,CB_RESETCONTENT,0,0);
+    SendMessageW(g_target,CB_RESETCONTENT,0,0);
     int p=primaryIndex(),matchedS=0,matchedT=0;
     g_sourceIndex=p;g_targetIndex=(p==0&&g_monitorCount>1)?1:0;
     for(int i=0;i<g_monitorCount;i++){
-        WCHAR name[150]={0};RECT r=g_monitors[i].rcMonitor;
-        appendi(name,i+1,150);appendw(name,W("  |  "),150);
-        appendw(name,(g_monitors[i].dwFlags&MONITORINFOF_PRIMARY)?W("PRINCIPAL"):W("Secundaria"),150);
-        appendw(name,W("  "),150);appendi(name,(int)(r.right-r.left),150);appendw(name,W(" x "),150);appendi(name,(int)(r.bottom-r.top),150);
-        appendw(name,W("  "),150);appendw(name,g_monitors[i].szDevice,150);
-        add(g_source,name);add(g_target,name);
+        WCHAR name[150];monitorName(i,name);add(g_target,name);
         if(srcName[0]&&eqw(g_monitors[i].szDevice,srcName)){g_sourceIndex=i;matchedS=1;}
         if(dstName[0]&&eqw(g_monitors[i].szDevice,dstName)){g_targetIndex=i;matchedT=1;}
     }
@@ -393,13 +449,15 @@ static int refreshMonitors(void){
         for(int i=0;i<g_monitorCount&&pick<0;i++)if(i!=g_sourceIndex)pick=i;
         g_targetIndex=pick<0?0:pick;
     }
-    comboselect(g_source,g_sourceIndex);comboselect(g_target,g_targetIndex);
+    fillSourceCombo();comboselect(g_target,g_targetIndex);
     updateModeLabel();
     return matchedS&&matchedT;
 }
 static void takeComboSelection(void){
     if(g_monitorCount<1)return;
-    g_sourceIndex=MIN(comboindex(g_source),g_monitorCount-1);
+    int sel=comboindex(g_source);
+    if(sel<g_monitorCount){g_sourceIndex=sel;g_srcWindow=0;}
+    else if(sel-g_monitorCount<g_winCount)g_srcWindow=g_winList[sel-g_monitorCount];
     g_targetIndex=MIN(comboindex(g_target),g_monitorCount-1);
 }
 static void dismissIds(void){KillTimer(g_main,ID_HIDEIDS);for(int i=0;i<16;i++)if(g_ids[i]){DestroyWindow(g_ids[i]);g_ids[i]=0;}}
@@ -520,11 +578,12 @@ static void computeFrame(int* ox,int* oy,int* ow,int* oh){
     *ow=MAX(1,MIN(*ow,g_tw));*oh=MAX(1,MIN(*oh,g_th));
     *ox=(g_tw-*ow)*g_xValue/100;*oy=(g_th-*oh)*g_yValue/100;
 }
-static void drawCursorOnCapture(void){
+/* (ox,oy) is the screen position of the capture's top-left pixel; w x h its size. */
+static void drawCursorOnCapture(int ox,int oy,int w,int h){
     if(!g_showCursor)return;
     CURSORINFO ci={0};ci.cbSize=sizeof(ci);
     if(!GetCursorInfo(&ci) || !(ci.flags&1))return;
-    RECT r=g_monitors[g_sourceIndex].rcMonitor;
+    RECT r={ox,oy,ox+w,oy+h};
     if(ci.ptScreenPos.x<r.left||ci.ptScreenPos.x>=r.right||ci.ptScreenPos.y<r.top||ci.ptScreenPos.y>=r.bottom)return;
     ICONINFO info={0};int hotX=0,hotY=0;
     if(GetIconInfo(ci.hCursor,&info)){
@@ -543,13 +602,42 @@ static void adaptFrameRate(DWORD elapsed){
     want=MAX(FRAME_MIN_MS,MIN(want,FRAME_MAX_MS));
     if(want>g_frameMs+15||want<g_frameMs-15){g_frameMs=want;SetTimer(g_output,1,(UINT)g_frameMs,0);}
 }
+/* Keeps the capture bitmap the size of the window's client area as the window is resized. */
+static int ensureCaptureSize(int w,int h){
+    if(w==g_sw&&h==g_sh)return 1;
+    HDC screen=GetDC(0);if(!screen)return 0;
+    HBITMAP bmp=CreateCompatibleBitmap(screen,w,h);ReleaseDC(0,screen);
+    if(!bmp)return 0;
+    SelectObject(g_capDC,bmp);if(g_capBmp)DeleteObject(g_capBmp);
+    g_capBmp=bmp;g_sw=w;g_sh=h;return 1;
+}
+/* One window: PrintWindow asks the window to draw itself, so it works even when other
+ * windows cover it; if the window refuses, copy its area from the screen instead.
+ * A minimised window keeps its last frame; a closed one keeps it and says so once. */
+static void captureWindow(void){
+    if(!IsWindow(g_srcWindow)){
+        if(!g_srcLost){g_srcLost=1;status(W("La ventana proyectada se ha cerrado: se mantiene la última imagen. Elige otro origen."));}
+        return;
+    }
+    if(IsIconic(g_srcWindow))return;
+    RECT cr={0};GetClientRect(g_srcWindow,&cr);
+    int w=(int)cr.right,h=(int)cr.bottom;
+    if(w<2||h<2||!ensureCaptureSize(w,h))return;
+    POINT o={0,0};ClientToScreen(g_srcWindow,&o);
+    if(!PrintWindow(g_srcWindow,g_capDC,PW_CLIENTONLY|PW_RENDERFULLCONTENT)){
+        HDC desktop=GetDC(0);
+        if(desktop){BitBlt(g_capDC,0,0,w,h,desktop,(int)o.x,(int)o.y,SRCCOPY|CAPTUREBLT);ReleaseDC(0,desktop);}
+    }
+    drawCursorOnCapture((int)o.x,(int)o.y,w,h);
+}
 static void captureSource(void){
+    if(g_srcWindow){captureWindow();return;}
     HDC desktop=GetDC(0);
     if(!desktop)return;
     RECT r=g_monitors[g_sourceIndex].rcMonitor;
     BitBlt(g_capDC,0,0,g_sw,g_sh,desktop,r.left,r.top,SRCCOPY|CAPTUREBLT);
     ReleaseDC(0,desktop);
-    drawCursorOnCapture();
+    drawCursorOnCapture((int)r.left,(int)r.top,g_sw,g_sh);
 }
 static void fillBox(int l,int t,int r,int b,DWORD colour){
     RECT rc={l,t,r,b};HBRUSH br=CreateSolidBrush(colour);FillRect(g_bufDC,&rc,br);DeleteObject(br);
@@ -642,15 +730,26 @@ static void restoreIfNeeded(void){
     refreshMonitors();
 }
 static int startOutput(void){
-    g_sourceIndex=comboindex(g_source);g_targetIndex=comboindex(g_target);
-    if(g_monitorCount<2 || g_sourceIndex==g_targetIndex || g_sourceIndex>=g_monitorCount || g_targetIndex>=g_monitorCount){
+    takeComboSelection();
+    int win=g_srcWindow!=0;
+    if(g_monitorCount<2 || g_targetIndex>=g_monitorCount || (!win && (g_sourceIndex==g_targetIndex || g_sourceIndex>=g_monitorCount))){
         MessageBoxW(g_main,W("No hay dos escritorios independientes. Comprueba el modo EXTENDER y pulsa Actualizar."),W("ProjectorScaler"),0x30);return 0;
     }
     if(g_targetIndex==controllingIndex()){
         MessageBoxW(g_main,W("PROTECCIÓN ACTIVADA: el destino es la pantalla donde estás manejando ProjectorScaler.\n\nElige la otra pantalla como destino para no ocultar el panel de control."),W("Selección de destino incorrecta"),0x30);return 0;
     }
+    if(win&&!IsWindow(g_srcWindow)){
+        MessageBoxW(g_main,W("La ventana elegida ya no existe. Pulsa Actualizar y elígela de nuevo."),W("ProjectorScaler"),0x30);return 0;
+    }
     RECT s=g_monitors[g_sourceIndex].rcMonitor,t=g_monitors[g_targetIndex].rcMonitor;
     g_sw=(int)(s.right-s.left);g_sh=(int)(s.bottom-s.top);
+    if(win){
+        /* Start at the window's client size; a minimised window starts at 16:9 until restored. */
+        RECT cr={0};GetClientRect(g_srcWindow,&cr);
+        g_sw=(int)cr.right;g_sh=(int)cr.bottom;
+        if(IsIconic(g_srcWindow)||g_sw<2||g_sh<2){g_sw=1280;g_sh=720;}
+    }
+    g_srcLost=0;
     g_tw=(int)(t.right-t.left);g_th=(int)(t.bottom-t.top);g_tOrgX=(int)t.left;g_tOrgY=(int)t.top;
     if(g_sw<2||g_sh<2||g_tw<2||g_th<2){status(W("Error: resolución de monitor incorrecta."));return 0;}
     HDC screen=GetDC(0);
@@ -871,9 +970,9 @@ static void createUI(void){
     g_brWhite=CreateSolidBrush(RGB3(255,255,255));g_brWindow=CreateSolidBrush(RGB3(239,243,248));
 
     section(W("01   PANTALLAS Y CONEXIÓN"),40,81,470);
-    lbl(W("Pantalla de origen (lo que vas a proyectar)"),41,115,346);
+    lbl(W("Origen: una pantalla o una ventana"),41,115,346);
     lbl(W("Pantalla de destino (proyector)"),399,115,342);
-    g_source=combo(ID_SOURCE,40,139,341);
+    g_source=combo(ID_SOURCE,40,139,341);SendMessageW(g_source,CB_SETDROPPEDWIDTH,(WPARAM)S(620),0);
     g_target=combo(ID_TARGET,399,139,338);
     button(W("IDENTIFICAR"),ID_IDENTIFY,40,176,160);
     button(W("Actualizar"),ID_RELOAD,208,176,120);
@@ -1007,6 +1106,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
         fitWindow(hwnd,(UINT)(w&0xffff),(const RECT*)l);return 0;
     case WM_COMMAND:{
         int id=(int)(w&0xffff),code=(int)((w>>16)&0xffff);
+        if(code==CBN_DROPDOWN && id==ID_SOURCE){fillSourceCombo();return 0;}
         if(code==CBN_SELCHANGE && (id==ID_SOURCE||id==ID_TARGET)){
             takeComboSelection();
             if(g_isRunning){

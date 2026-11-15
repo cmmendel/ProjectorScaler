@@ -49,3 +49,12 @@ EXPORTS
  SetCapture
  ReleaseCapture
  GetCursorPos
+ EnumWindows
+ IsWindowVisible
+ GetWindowTextLengthW
+ GetWindow
+ GetWindowLongPtrW
+ IsWindow
+ IsIconic
+ PrintWindow
+ ClientToScreen

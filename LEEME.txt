@@ -14,8 +14,9 @@ PRIMER USO
    En Duplicar no se pueden mostrar números distintos porque ambas salidas
    muestran la misma imagen. En ese caso, al iniciar proyección se solicita
    autorización para pasar TEMPORALMENTE a Extender.
-5. Elige origen (lo que se captura) y destino (proyector). Por seguridad, la
-   aplicación impide iniciar sobre la pantalla que contiene la interfaz.
+5. Elige origen (una pantalla entera o una sola ventana) y destino
+   (proyector). Por seguridad, la aplicación impide iniciar sobre la pantalla
+   que contiene la interfaz.
 6. Pulsa INICIAR PROYECCIÓN y ajusta tamaño, posición y relación de aspecto.
 7. Pulsa DETENER PROYECCIÓN. Si empezó desde Duplicar, la aplicación intentará
    restaurar Duplicar siempre que esté marcada la casilla correspondiente.
@@ -39,6 +40,19 @@ la pantalla del proyector: aparece un marco ámbar con tiradores.
 El formato pasa a "Libre (con el ratón)" y se guarda, también en los perfiles.
 Pulsa "Terminar ajuste" para quitar el marco. Elegir otro formato o un perfil
 vuelve al ajuste por tamaño y posición.
+
+PROYECTAR UNA SOLA VENTANA
+En "Origen", debajo de las pantallas, aparecen las ventanas abiertas
+("Ventana · título"). La lista se actualiza cada vez que la despliegas. Elige
+una y el proyector muestra sólo esa ventana (su contenido, sin bordes ni barra
+de título), aunque otras ventanas la tapen en tu pantalla.
+- Si cambias el tamaño de la ventana, la proyección se adapta.
+- Si la minimizas, el proyector se queda con la última imagen hasta que la
+  restaures.
+- Si la cierras, se queda la última imagen y la línea de estado lo avisa.
+- Algunas aplicaciones con aceleración por hardware o DRM pueden salir en negro.
+- La ventana elegida no se guarda en la configuración ni en los perfiles: al
+  volver a abrir el programa, el origen vuelve a ser una pantalla.
 
 AJUSTES
 - Tamaño en %, posición horizontal/vertical 0-100.
@@ -65,6 +79,7 @@ ESTADO / LIMITACIONES
 - La identificación/cambio de topología con >2 monitores no está validada.
 
 CAMBIOS EN 2.1
+- Se puede proyectar una sola ventana en lugar de una pantalla entera.
 - Las pantallas elegidas en los desplegables se respetan al iniciar (en 2.0 se
   volvía a la selección anterior sin avisar).
 - Cambiar de pantalla durante la proyección la reinicia sobre la nueva pareja

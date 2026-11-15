@@ -10,9 +10,9 @@ RC="${RC:-llvm-rc}"
 cd "$(dirname "$0")"
 mkdir -p build
 cd build
-for dll in kernel32 user32 gdi32; do
+for dll in kernel32 user32 gdi32 dwmapi; do
   $LLD_LINK /machine:x64 /dll /noentry /def:"$dll.def" /out:"$dll.dll" /implib:"$dll.lib"
 done
 $RC /fo ProjectorScaler.res ../ProjectorScaler.rc
 $CLANG --target=x86_64-pc-windows-msvc -O2 -c -ffreestanding -fno-builtin -Wall -Wextra ../ProjectorScalerPortable.c -o ProjectorScalerPortable.obj
-$LLD_LINK /machine:x64 /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib
+$LLD_LINK /machine:x64 /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib dwmapi.lib
