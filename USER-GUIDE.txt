@@ -117,8 +117,16 @@ STATUS / LIMITS
   real Windows 11 desktop with two screens, but NOT yet with an HDMI projector,
   and the projection itself (including the Duplicate/Extend switch and tab
   projection) has not been run in those checks.
-- GDI capture up to 20 fps, dropping to 4 fps if the computer cannot keep up;
-  not meant for smooth video, DRM or games.
+- A whole screen (Basic mode, or the Screens tab) is mirrored by the Windows
+  magnifier, which the graphics card draws at about 60 frames per second: meant
+  for video. It is not yet checked on a projector. If the magnifier is not
+  available, the app falls back to the slow capture below.
+- A single window or browser tab, Black screen, and adjusting the frame with the
+  mouse use GDI capture: about 13-20 frames per second (measured: 37 ms per
+  1920x1080 frame), down to 4 if the computer cannot keep up. Fine for slides
+  and pages, not for video.
+- The sound does not go through the app; Windows plays it as usual.
+- Protected video (Netflix and similar, DRM) shows black on the projector.
 - Does not touch audio and does not switch the projector's lamp off.
 - The EXE is not code-signed; SmartScreen may warn on first run.
 - Windows 10 before 1703 is not supported.
@@ -133,6 +141,8 @@ CHANGES IN 2.2
 - Browser tabs (Chrome, Edge) as a source, with the freeze-on-doubt guard.
 - Spanish / English switch for the whole app.
 - Footer credit with the build date, and a link to cmmendel.com.
+- A whole screen is mirrored by the graphics card (Windows magnifier) for
+  smooth video; the app always opens in Basic.
 
 CHANGES IN 2.1
 - One window can be projected instead of a whole screen.

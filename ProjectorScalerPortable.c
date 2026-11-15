@@ -124,6 +124,12 @@ API(void,Sleep,(DWORD));
 API(LONG,CoInitializeEx,(void*,DWORD));
 API(LONG,CoCreateInstance,(const void*,void*,DWORD,const void*,void**));
 API(void,SysFreeString,(WCHAR*));
+API(BOOL,SetLayeredWindowAttributes,(HWND,DWORD,BYTE,DWORD));
+API(LONG_PTR,SetWindowLongPtrW,(HWND,int,LONG_PTR));
+API(BOOL,MagInitialize,(void));
+API(BOOL,MagUninitialize,(void));
+API(BOOL,MagSetWindowSource,(HWND,RECT));
+API(BOOL,MagSetWindowTransform,(HWND,float*));
 IN(HANDLE __stdcall ShellExecuteW(HWND,const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR*,int));
 API(BOOL,ClientToScreen,(HWND,POINT*));
 /* dwmapi */
@@ -331,6 +337,12 @@ typedef struct {UINT cbSize,fMask;int nMin,nMax;UINT nPage;int nPos,nTrackPos;} 
 #define FONT_TITLE 1
 #define FONT_TINY 2
 #define FRAME_MIN_MS 50
+#define MAG_FRAME_MS 15 /* the magnifier path: about the screen's refresh rate */
+#define WS_EX_LAYERED 0x00080000u
+#define LWA_ALPHA 2u
+#define SW_SHOWNA 8
+#define GWL_STYLE (-16)
+#define MS_SHOWMAGNIFIEDCURSOR 1u
 #define FRAME_MAX_MS 250
 #define ASPECT_FREE 6     /* frame set by dragging on the projector */
 #define FREE_UNIT 10000   /* free frame stored in 1/10000 of the target screen */
@@ -404,6 +416,12 @@ static void tabRelease(void);
 static int g_pickerOpen=0;     /* advanced: 01 opened tall, 02-04 folded to their titles */
 static int g_advFold0=0,g_advFold1=0; /* g_layout range of the controls of 02-04 */
 static HWND g_advSec[3];        /* the titles of 02, 03 and 04 */
+/* A whole screen is mirrored by the Windows magnifier control, which DWM draws on the GPU at
+ * about the refresh rate. GDI capture stays for windows, tabs, black and frame adjusting. */
+static HWND g_mag=0;
+static int g_magInit=0;  /* 0 not tried, 1 ready, -1 unavailable */
+static int g_magShown=0,g_magCursor=-1;
+static RECT g_magDst;
 static RECT g_linkRect; /* "Colegio Mayor Mendel" in the footer, a link to cmmendel.com */
 static int g_overLink=0;
 static const WCHAR* g_tabError=0; /* why the Pestañas tab is empty, when it is not just "no tabs" */
@@ -660,7 +678,8 @@ static void clearRender(void){
 }
 static void refreshRunState(void);
 static void stopOutput(void){
-    if(g_output){KillTimer(g_output,1);DestroyWindow(g_output);g_output=0;}
+    if(g_output){KillTimer(g_output,1);DestroyWindow(g_output);g_output=0;} /* takes the magnifier with it */
+    g_mag=0;g_magShown=0;g_magCursor=-1;
     clearRender();g_isRunning=0;g_isBlack=0;g_frameMs=FRAME_MIN_MS;
     if(g_start)SetWindowTextW(g_start,startLabel(0));
     if(g_black){SetWindowTextW(g_black,L("Pantalla negra","Black screen"));EnableWindow(g_black,0);}
@@ -810,22 +829,26 @@ static void drawEditOverlay(int fx,int fy,int fw,int fh){
     SelectObject(g_bufDC,old);
 }
 /* Puts the last capture into the frame. Cheap enough to call on every mouse move. */
+/* Which part of the source (s*) lands where on the projector (d*), for the frame f*. */
+static void pictureRects(int fx,int fy,int fw,int fh,int* sx,int* sy,int* sw,int* sh,int* dx,int* dy,int* dw,int* dh){
+    *sx=0;*sy=0;*sw=g_sw;*sh=g_sh;*dx=fx;*dy=fy;*dw=fw;*dh=fh;
+    int fit=g_runBasic?0:g_fitIndex;
+    if(fit==0){
+        double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
+        if(ar>fr){*dh=MAX(1,(int)(fw/ar+0.5));*dy=fy+(fh-*dh)/2;}
+        else {*dw=MAX(1,(int)(fh*ar+0.5));*dx=fx+(fw-*dw)/2;}
+    }else if(fit==1){
+        double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
+        if(ar>fr){*sw=MAX(1,(int)(g_sh*fr+0.5));*sx=(g_sw-*sw)/2;}
+        else {*sh=MAX(1,(int)(g_sw/fr+0.5));*sy=(g_sh-*sh)/2;}
+    }
+}
 static void compose(void){
     if(!g_isRunning||!g_bufDC)return;
     PatBlt(g_bufDC,0,0,g_tw,g_th,BLACKNESS);
     int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
     if(!g_isBlack){
-        int sx=0,sy=0,sw=g_sw,sh=g_sh,dx=fx,dy=fy,dw=fw,dh=fh;
-        int fit=g_runBasic?0:g_fitIndex;
-        if(fit==0){
-            double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
-            if(ar>fr){dh=MAX(1,(int)(fw/ar+0.5));dy=fy+(fh-dh)/2;}
-            else {dw=MAX(1,(int)(fh*ar+0.5));dx=fx+(fw-dw)/2;}
-        }else if(fit==1){
-            double ar=(double)g_sw/g_sh,fr=(double)fw/fh;
-            if(ar>fr){sw=MAX(1,(int)(g_sh*fr+0.5));sx=(g_sw-sw)/2;}
-            else {sh=MAX(1,(int)(g_sw/fr+0.5));sy=(g_sh-sh)/2;}
-        }
+        int sx,sy,sw,sh,dx,dy,dw,dh;pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);
         SetStretchBltMode(g_bufDC,HALFTONE);
         SetBrushOrgEx(g_bufDC,0,0,0); /* required by GDI after selecting HALFTONE */
         StretchBlt(g_bufDC,dx,dy,dw,dh,g_capDC,sx,sy,sw,sh,SRCCOPY);
@@ -833,8 +856,45 @@ static void compose(void){
     if(g_editFrame)drawEditOverlay(fx,fy,fw,fh);
     InvalidateRect(g_output,0,0);
 }
+static void magCreate(void){
+    if(g_srcWindow||!g_output)return;
+    if(g_magInit==0)g_magInit=MagInitialize()?1:-1;
+    if(g_magInit!=1)return;
+    g_mag=CreateWindowExW(0,W("Magnifier"),W(""),WS_CHILD,0,0,1,1,g_output,0,g_inst,0);
+    g_magShown=0;g_magCursor=-1;g_magDst.left=g_magDst.top=g_magDst.right=g_magDst.bottom=0;
+}
+/* Draws this frame with the magnifier when it can; 0 means the GDI path has to. */
+static int magRender(void){
+    int want=g_mag&&!g_srcWindow&&!g_isBlack&&!g_editFrame&&g_sourceIndex<g_monitorCount;
+    if(!want){
+        if(g_magShown){ShowWindow(g_mag,SW_HIDE);g_magShown=0;}
+        return 0;
+    }
+    int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
+    int sx,sy,sw,sh,dx,dy,dw,dh;pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);
+    RECT dst={dx,dy,dx+dw,dy+dh};
+    if(!g_magShown||dst.left!=g_magDst.left||dst.top!=g_magDst.top||dst.right!=g_magDst.right||dst.bottom!=g_magDst.bottom){
+        float m[9]={(float)dw/(float)sw,0,0, 0,(float)dh/(float)sh,0, 0,0,1};
+        if(!MagSetWindowTransform(g_mag,m))return 0;
+        SetWindowPos(g_mag,0,dx,dy,dw,dh,SWP_NOZORDER|SWP_NOACTIVATE);
+        g_magDst=dst;
+        PatBlt(g_bufDC,0,0,g_tw,g_th,BLACKNESS);InvalidateRect(g_output,0,0); /* black around the picture */
+    }
+    if(g_magCursor!=g_showCursor){
+        LONG_PTR st=GetWindowLongPtrW(g_mag,GWL_STYLE);
+        SetWindowLongPtrW(g_mag,GWL_STYLE,g_showCursor?(st|MS_SHOWMAGNIFIEDCURSOR):(st&~(LONG_PTR)MS_SHOWMAGNIFIEDCURSOR));
+        g_magCursor=g_showCursor;
+    }
+    RECT m=g_monitors[g_sourceIndex].rcMonitor;
+    RECT src={m.left+sx,m.top+sy,m.left+sx+sw,m.top+sy+sh};
+    if(!MagSetWindowSource(g_mag,src)){ShowWindow(g_mag,SW_HIDE);g_magShown=0;return 0;}
+    InvalidateRect(g_mag,0,0);
+    if(!g_magShown){ShowWindow(g_mag,SW_SHOWNA);g_magShown=1;}
+    return 1;
+}
 static void render(void){
     if(!g_isRunning||!g_bufDC)return;
+    if(magRender())return;
     if(!g_isBlack)captureSource();
     compose();
 }
@@ -964,11 +1024,14 @@ static int startOutput(void){
     ReleaseDC(0,screen);
     if(!g_capDC||!g_bufDC||!g_capBmp||!g_bufBmp){clearRender();status(L("Error: no se pudieron crear las superficies GDI.","Error: the GDI surfaces could not be created."));return 0;}
     g_capOld=SelectObject(g_capDC,g_capBmp);g_bufOld=SelectObject(g_bufDC,g_bufBmp);
-    g_output=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,W("ProjectorScalerOutput"),W("ProjectorScaler salida"),WS_POPUP|WS_VISIBLE,(int)t.left,(int)t.top,g_tw,g_th,0,0,g_inst,0);
+    g_output=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED,W("ProjectorScalerOutput"),W("ProjectorScaler salida"),WS_POPUP,(int)t.left,(int)t.top,g_tw,g_th,0,0,g_inst,0);
     if(!g_output){clearRender();status(L("Error al crear la ventana HDMI.","Error creating the HDMI window."));return 0;}
+    SetLayeredWindowAttributes(g_output,0,255,LWA_ALPHA); /* a layered window is invisible until this */
+    PatBlt(g_bufDC,0,0,g_tw,g_th,BLACKNESS);
+    magCreate();
     SetWindowPos(g_output,HWND_TOPMOST,t.left,t.top,g_tw,g_th,SWP_NOACTIVATE|SWP_SHOWWINDOW);
     g_isRunning=1;g_isBlack=0;
-    render();SetTimer(g_output,1,50,0);
+    render();SetTimer(g_output,1,g_magShown?MAG_FRAME_MS:FRAME_MIN_MS,0);g_frameMs=g_magShown?MAG_FRAME_MS:FRAME_MIN_MS;
     refreshRunState();
     status(g_hotkey==1?L("Proyección activa. Parada de emergencia: Ctrl + Alt + P.","Projecting. Emergency stop: Ctrl + Alt + P."):
            g_hotkey==2?L("Proyección activa. Parada de emergencia: Ctrl + Alt + Mayús + P (Ctrl + Alt + P la usa otro programa).","Projecting. Emergency stop: Ctrl + Alt + Shift + P (another program uses Ctrl + Alt + P)."):
@@ -1037,7 +1100,11 @@ static void dragTo(int x,int y,int keepAspect){
 static LRESULT __stdcall outputProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     int mx=(int)(short)(l&0xffff),my=(int)(short)((l>>16)&0xffff);
     switch(msg){
-    case WM_TIMER:if(w==1){DWORD t0=GetTickCount();render();adaptFrameRate(GetTickCount()-t0);}return 0;
+    case WM_TIMER:if(w==1){
+        DWORD t0=GetTickCount();render();
+        if(g_magShown){if(g_frameMs!=MAG_FRAME_MS){g_frameMs=MAG_FRAME_MS;SetTimer(g_output,1,MAG_FRAME_MS,0);}}
+        else adaptFrameRate(GetTickCount()-t0);
+    }return 0;
     case WM_ERASEBKGND:return 1;
     case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(hwnd,&ps);if(g_bufDC&&dc)BitBlt(dc,0,0,g_tw,g_th,g_bufDC,0,0,SRCCOPY);EndPaint(hwnd,&ps);return 0;}
     case WM_SETCURSOR:
@@ -2179,6 +2246,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     case WM_CTLCOLORSTATIC:
         SetBkMode((HDC)w,TRANSPARENT);SetTextColor((HDC)w,RGB3(43,65,91));return (LRESULT)g_brWhite;
     case WM_DESTROY:
+        if(g_magInit==1){stopOutput();MagUninitialize();g_magInit=0;}
         KillTimer(hwnd,ID_PREVIEW_TICK);KillTimer(hwnd,ID_THUMBS);tilesClear();tabRelease();
         UnregisterHotKey(hwnd,ID_EMERGENCY);dismissIds();stopOutput();restoreIfNeeded();
         if(g_fontUi)DeleteObject(g_fontUi);if(g_fontTitle)DeleteObject(g_fontTitle);if(g_fontHeader)DeleteObject(g_fontHeader);

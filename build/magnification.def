@@ -1,0 +1,6 @@
+LIBRARY magnification.dll
+EXPORTS
+ MagInitialize
+ MagUninitialize
+ MagSetWindowSource
+ MagSetWindowTransform

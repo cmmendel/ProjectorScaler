@@ -63,3 +63,5 @@ EXPORTS
  GetClassNameW
  GetWindowThreadProcessId
  IsHungAppWindow
+ SetLayeredWindowAttributes
+ SetWindowLongPtrW
