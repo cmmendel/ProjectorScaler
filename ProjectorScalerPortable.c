@@ -390,7 +390,7 @@ typedef struct {UINT cbSize,fMask;int nMin,nMax;UINT nPage;int nPos,nTrackPos;} 
 #define ID_UPDATE_WAIT 238   /* timer: an update waits for the projection to stop */
 #define WM_UPDATE_CHECKED (WM_APP+1) /* worker thread -> window: wParam = UPD_* */
 #define WM_UPDATE_FETCHED (WM_APP+2) /* worker thread -> window: wParam = DL_* */
-#define APP_VERSION L"2.3"   /* release tags are v<APP_VERSION>: the release workflow checks it */
+#define APP_VERSION L"2.4"   /* release tags are v<APP_VERSION>: the release workflow checks it */
 #define REPO_PATH L"/repos/cmmendel/ProjectorScaler/releases/latest"
 #define RELEASES_PAGE L"https://github.com/cmmendel/ProjectorScaler/releases/latest"
 #define ASSET_NAME "ProjectorScalerPortable.exe"
@@ -757,7 +757,10 @@ static void clearRender(void){
     g_capDC=g_bufDC=0;g_capBmp=g_bufBmp=0;g_capOld=g_bufOld=0;
 }
 static void refreshRunState(void);
+static void gpuRelease(void);
+static int g_gpuFailed;
 static void stopOutput(void){
+    gpuRelease();g_gpuFailed=0;
     if(g_output){KillTimer(g_output,1);DestroyWindow(g_output);g_output=0;} /* takes the magnifier with it */
     g_mag=0;g_magShown=0;g_magCursor=-1;
     clearRender();g_isRunning=0;g_isBlack=0;g_frameMs=FRAME_MIN_MS;
@@ -952,6 +955,14 @@ static int magRender(void){
     }
     int fx,fy,fw,fh;computeFrame(&fx,&fy,&fw,&fh);
     int sx,sy,sw,sh,dx,dy,dw,dh;pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);
+    /* The magnifier point-samples when it shrinks: measured on a 1-px line pattern, it keeps
+     * only pure black and white at 0.8 and 0.6 and the lines vanish at 0.5. Shrinking goes to
+     * the GDI path (HALFTONE averages); the magnifier keeps 1:1, and enlarging when the GPU
+     * path is not available. */
+    if(dw<sw||dh<sh){
+        if(g_magShown){ShowWindow(g_mag,SW_HIDE);g_magShown=0;}
+        return 0;
+    }
     RECT dst={dx,dy,dx+dw,dy+dh};
     if(!g_magShown||dst.left!=g_magDst.left||dst.top!=g_magDst.top||dst.right!=g_magDst.right||dst.bottom!=g_magDst.bottom){
         float m[9]={(float)dw/(float)sw,0,0, 0,(float)dh/(float)sh,0, 0,0,1};
@@ -974,8 +985,307 @@ static int magRender(void){
     if(!g_magShown){ShowWindow(g_mag,SW_SHOWNA);g_magShown=1;}
     return 1;
 }
+/* ---- GPU path: a scaled whole screen at the refresh rate, without dropping pixels ----
+ * DXGI Desktop Duplication hands over each new frame of the source screen as a GPU texture.
+ * It is copied (the pointer is drawn on the copy with GDI: duplication leaves it out) and a
+ * pixel shader shrinks it, averaging every source pixel under each projector pixel (a box
+ * filter built from bilinear taps no more than one source pixel apart). The result goes to a
+ * swap chain of exactly the picture's size, in a window of its own over the output window, so
+ * nothing stretches it afterwards. Any failure falls back to the GDI path, which also averages.
+ * COM is called through vtable indices, checked against MinGW's dxgi.h, dxgi1_2.h and d3d11.h. */
+typedef struct {DWORD a;WORD b,c;BYTE d[8];} DXGUID_;
+static const DXGUID_ IID_IDXGIFactory2_={0x50c83a1c,0xe072,0x4c48,{0x87,0xb0,0x36,0x30,0xfa,0x36,0xa6,0xd0}};
+static const DXGUID_ IID_IDXGIOutput1_={0x00cddea8,0x939b,0x4b83,{0xa3,0x40,0xa6,0x85,0x22,0x66,0x66,0xcc}};
+static const DXGUID_ IID_ID3D11Texture2D_={0x6f15aaf2,0xd208,0x4e89,{0x9a,0xb4,0x48,0x95,0x35,0xd3,0x4f,0x9c}};
+static const DXGUID_ IID_IDXGISurface1_={0x4ae63092,0x6327,0x4c1b,{0x80,0xae,0xbf,0xe1,0x2e,0xa3,0x2b,0x86}};
+typedef struct {WCHAR DeviceName[32];RECT Desktop;BOOL Attached;UINT Rotation;HMONITOR Monitor;} DXOUTDESC_;
+typedef struct {UINT W,H,RefN,RefD,Format,Scanline,Scaling,Rotation;BOOL InSysMem;} DXDUPDESC_;
+typedef struct {long long LastPresent,LastMouse;UINT Accum;BOOL Coalesced,Protected;POINT PtrPos;BOOL PtrVisible;UINT Meta,PtrShape;} DXFRAMEINFO_;
+typedef struct {UINT W,H,Mips,Array,Format,SampleCount,SampleQuality,Usage,Bind,Cpu,Misc;} DXTEXDESC_;
+typedef struct {UINT W,H,Format;BOOL Stereo;UINT SampleCount,SampleQuality,Usage,Count,Scaling,Effect,Alpha,Flags;} DXSWAPDESC_;
+typedef struct {UINT Bytes,Usage,Bind,Cpu,Misc,Stride;} DXBUFDESC_;
+typedef struct {UINT Filter,U,V,W;float Bias;UINT Aniso,Cmp;float Border[4];float MinLod,MaxLod;} DXSAMPDESC_;
+typedef struct {float X,Y,W,H,MinD,MaxD;} DXVIEWPORT_;
+typedef LONG (__stdcall *D3DCompileFn)(const void*,SIZE_T,const char*,const void*,void*,const char*,const char*,UINT,UINT,void**,void**);
+API(LONG,CreateDXGIFactory1,(const void*,void**));
+API(LONG,D3D11CreateDevice,(void*,int,void*,UINT,const int*,UINT,UINT,void**,int*,void**));
+API(void*,LoadLibraryExW,(const WCHAR*,HANDLE,DWORD));
+API(void*,GetProcAddress,(void*,const char*));
+#define WS_EX_TRANSPARENT 0x20
+#define WS_DISABLED 0x08000000
+#define COM(o,i,ret,args) ((ret(__stdcall*)args)((*(void***)(o))[i]))
+#define COMREL(o) do{if(o){COM(o,2,ULONG_PTR,(void*))(o);(o)=0;}}while(0)
+#define DXGI_FMT_BGRA 87
+#define DXGI_ERR_WAIT_TIMEOUT ((LONG)0x887A0027)
+#define GPU_MAX_TAPS 8
+static void *g_gpuFactory=0,*g_gpuDev=0,*g_gpuCtx=0,*g_gpuOutput=0,*g_gpuDup=0;
+static void *g_gpuClean=0,*g_gpuWork=0,*g_gpuWorkSrv=0,*g_gpuWorkSurf=0;
+static void *g_gpuSwap=0,*g_gpuRtv=0,*g_gpuVs=0,*g_gpuPs=0,*g_gpuCb=0,*g_gpuSamp=0;
+static HWND g_gpuWnd=0;
+static int g_gpuFailed=0;
+static int g_gpuNoFrame=0,g_gpuShown=0,g_gpuSrc=-1,g_gpuW=0,g_gpuH=0,g_gpuSwapW=0,g_gpuSwapH=0,g_gpuHasFrame=0;
+static RECT g_gpuDst;
+static DWORD g_gpuRetryAt=0;
+#ifdef GPU_STATS
+static int g_gpuPresents=0,g_gpuFrames=0;static DWORD g_gpuStatsAt=0;
+static int lenw(const WCHAR* s){int n=0;while(s[n])n++;return n;}
+#endif
+static const char g_gpuHlsl[]=
+    "cbuffer C:register(b0){float4 r;float4 k;};"
+    "Texture2D t:register(t0);SamplerState s:register(s0);"
+    "struct V{float4 p:SV_Position;float2 c:TEXCOORD0;};"
+    "V vs(uint i:SV_VertexID){V o;float2 q=float2((i<<1)&2,i&2);"
+    "o.p=float4(q.x*2-1,1-q.y*2,0,1);o.c=r.xy+(r.zw-r.xy)*q;return o;}"
+    "float4 ps(V i):SV_Target{float3 a=0;int nx=(int)k.z,ny=(int)k.w;"
+    "[loop]for(int y=0;y<ny;y++)[loop]for(int x=0;x<nx;x++)"
+    "a+=t.SampleLevel(s,i.c+float2((x+0.5)/nx-0.5,(y+0.5)/ny-0.5)*k.xy,0).rgb;"
+    "return float4(a/(nx*ny),1);}";
+static void gpuHide(void){
+    if(g_gpuShown&&g_gpuWnd){ShowWindow(g_gpuWnd,SW_HIDE);}
+    g_gpuShown=0;
+}
+static void gpuDropDuplication(void){
+    COMREL(g_gpuDup);COMREL(g_gpuWorkSurf);COMREL(g_gpuWorkSrv);COMREL(g_gpuWork);COMREL(g_gpuClean);
+    g_gpuHasFrame=0;
+}
+static void gpuRelease(void){
+    gpuHide();gpuDropDuplication();
+    COMREL(g_gpuRtv);COMREL(g_gpuSwap);COMREL(g_gpuSamp);COMREL(g_gpuCb);COMREL(g_gpuPs);COMREL(g_gpuVs);
+    COMREL(g_gpuOutput);
+    if(g_gpuCtx){COM(g_gpuCtx,110,void,(void*))(g_gpuCtx);COM(g_gpuCtx,111,void,(void*))(g_gpuCtx);} /* ClearState, Flush */
+    COMREL(g_gpuCtx);COMREL(g_gpuDev);COMREL(g_gpuFactory);
+    if(g_gpuWnd){DestroyWindow(g_gpuWnd);g_gpuWnd=0;}
+    g_gpuSrc=-1;g_gpuSwapW=g_gpuSwapH=0;g_gpuRetryAt=0;g_gpuNoFrame=0;
+}
+static void* gpuCompile(D3DCompileFn compile,const char* entry,const char* target){
+    void *code=0,*err=0;
+    LONG hr=compile(g_gpuHlsl,sizeof(g_gpuHlsl)-1,"ps",0,0,entry,target,0,0,&code,&err);
+    COMREL(err);
+    return hr<0?0:code;
+}
+/* Device on the adapter that drives the source screen, shaders, sampler, constants. */
+static int gpuInit(void){
+    if(CreateDXGIFactory1(&IID_IDXGIFactory2_,&g_gpuFactory)<0||!g_gpuFactory){g_gpuFactory=0;return 0;}
+    const WCHAR* want=g_monitors[g_sourceIndex].szDevice;
+    void* adapter=0;
+    for(UINT a=0;!g_gpuOutput&&COM(g_gpuFactory,12,LONG,(void*,UINT,void**))(g_gpuFactory,a,&adapter)>=0;a++){
+        void* out=0;
+        for(UINT o=0;COM(adapter,7,LONG,(void*,UINT,void**))(adapter,o,&out)>=0;o++){
+            DXOUTDESC_ d;d.DeviceName[0]=0;
+            if(COM(out,7,LONG,(void*,DXOUTDESC_*))(out,&d)>=0&&eqw(d.DeviceName,want)&&(d.Rotation==0||d.Rotation==1)){
+                if(COM(out,0,LONG,(void*,const void*,void**))(out,&IID_IDXGIOutput1_,&g_gpuOutput)<0)g_gpuOutput=0;
+            }
+            COMREL(out);
+            if(g_gpuOutput)break;
+        }
+        if(g_gpuOutput){
+            int level=0;
+            if(D3D11CreateDevice(adapter,0,0,0x20,0,0,7,&g_gpuDev,&level,&g_gpuCtx)<0){g_gpuDev=g_gpuCtx=0;}
+            else if(level<0xa000){COMREL(g_gpuCtx);COMREL(g_gpuDev);} /* the shaders need feature level 10 */
+        }
+        COMREL(adapter);
+    }
+    if(!g_gpuOutput||!g_gpuDev)return 0;
+    void* lib=LoadLibraryExW(W("d3dcompiler_47.dll"),0,0x800); /* System32 only, never the EXE's folder */
+    D3DCompileFn compile=lib?(D3DCompileFn)GetProcAddress(lib,"D3DCompile"):0;
+    if(!compile)return 0;
+    void* vsCode=gpuCompile(compile,"vs","vs_4_0");void* psCode=gpuCompile(compile,"ps","ps_4_0");
+    int ok=vsCode&&psCode;
+    if(ok)ok=COM(g_gpuDev,12,LONG,(void*,const void*,SIZE_T,void*,void**))(g_gpuDev,COM(vsCode,3,void*,(void*))(vsCode),COM(vsCode,4,SIZE_T,(void*))(vsCode),0,&g_gpuVs)>=0;
+    if(ok)ok=COM(g_gpuDev,15,LONG,(void*,const void*,SIZE_T,void*,void**))(g_gpuDev,COM(psCode,3,void*,(void*))(psCode),COM(psCode,4,SIZE_T,(void*))(psCode),0,&g_gpuPs)>=0;
+    COMREL(vsCode);COMREL(psCode);
+    if(!ok)return 0;
+    DXBUFDESC_ b;b.Bytes=32;b.Usage=0;b.Bind=0x4;b.Cpu=0;b.Misc=0;b.Stride=0; /* constant buffer */
+    if(COM(g_gpuDev,3,LONG,(void*,const DXBUFDESC_*,const void*,void**))(g_gpuDev,&b,0,&g_gpuCb)<0)return 0;
+    DXSAMPDESC_ s;s.Filter=0x15;s.U=s.V=s.W=3;s.Bias=0;s.Aniso=1;s.Cmp=1; /* linear, clamp */
+    s.Border[0]=s.Border[1]=s.Border[2]=s.Border[3]=0;s.MinLod=0;s.MaxLod=0;
+    if(COM(g_gpuDev,23,LONG,(void*,const DXSAMPDESC_*,void**))(g_gpuDev,&s,&g_gpuSamp)<0)return 0;
+    g_gpuSrc=g_sourceIndex;
+    return 1;
+}
+static void* gpuTexture(UINT w,UINT h,UINT bind,UINT misc){
+    DXTEXDESC_ d;d.W=w;d.H=h;d.Mips=1;d.Array=1;d.Format=DXGI_FMT_BGRA;d.SampleCount=1;d.SampleQuality=0;
+    d.Usage=0;d.Bind=bind;d.Cpu=0;d.Misc=misc;
+    void* t=0;
+    if(COM(g_gpuDev,5,LONG,(void*,const DXTEXDESC_*,const void*,void**))(g_gpuDev,&d,0,&t)<0)return 0;
+    return t;
+}
+/* Duplication of the source screen, and the two copies its frames go through. */
+static int gpuDuplicate(void){
+    if(COM(g_gpuOutput,22,LONG,(void*,void*,void**))(g_gpuOutput,g_gpuDev,&g_gpuDup)<0){g_gpuDup=0;return 0;}
+    DXDUPDESC_ d;d.Format=0;d.Rotation=0;d.InSysMem=1;d.W=d.H=0;
+    COM(g_gpuDup,7,void,(void*,DXDUPDESC_*))(g_gpuDup,&d);
+    if(d.Format!=DXGI_FMT_BGRA||(d.Rotation!=0&&d.Rotation!=1)||d.W<2||d.H<2){gpuDropDuplication();return 0;}
+    g_gpuW=(int)d.W;g_gpuH=(int)d.H;
+    g_gpuClean=gpuTexture(d.W,d.H,0x8,0);
+    g_gpuWork=gpuTexture(d.W,d.H,0x8|0x20,0x200); /* shader resource + render target, GDI compatible */
+    if(!g_gpuClean||!g_gpuWork){gpuDropDuplication();return 0;}
+    if(COM(g_gpuDev,7,LONG,(void*,void*,const void*,void**))(g_gpuDev,g_gpuWork,0,&g_gpuWorkSrv)<0){g_gpuWorkSrv=0;gpuDropDuplication();return 0;}
+    if(COM(g_gpuWork,0,LONG,(void*,const void*,void**))(g_gpuWork,&IID_IDXGISurface1_,&g_gpuWorkSurf)<0){g_gpuWorkSurf=0;gpuDropDuplication();return 0;}
+    return 1;
+}
+static LRESULT __stdcall gpuWndProc(HWND h,UINT m,WPARAM w,LPARAM l){
+    if(m==WM_ERASEBKGND)return 1;
+    return DefWindowProcW(h,m,w,l);
+}
+/* The window and swap chain of exactly the picture's size, placed over the output window. */
+static int gpuPlace(int dx,int dy,int dw,int dh){
+    if(!g_gpuWnd){
+        static int registered=0;
+        if(!registered){
+            WNDCLASSEXW c={0};c.cbSize=sizeof(c);c.lpfnWndProc=gpuWndProc;c.hInstance=g_inst;c.lpszClassName=W("ProjectorScalerGpu");
+            if(!RegisterClassExW(&c))return 0;
+            registered=1;
+        }
+        g_gpuWnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TRANSPARENT,W("ProjectorScalerGpu"),W(""),
+            WS_POPUP|WS_DISABLED,g_tOrgX+dx,g_tOrgY+dy,dw,dh,g_output,0,g_inst,0);
+        if(!g_gpuWnd)return 0;
+        g_gpuDst.left=g_gpuDst.top=g_gpuDst.right=g_gpuDst.bottom=0;
+    }
+    if(!g_gpuSwap){
+        DXSWAPDESC_ d;d.W=(UINT)dw;d.H=(UINT)dh;d.Format=DXGI_FMT_BGRA;d.Stereo=0;d.SampleCount=1;d.SampleQuality=0;
+        d.Usage=0x20;d.Count=2;d.Scaling=0;d.Effect=4;d.Alpha=0;d.Flags=0; /* render target, flip discard */
+        if(COM(g_gpuFactory,15,LONG,(void*,void*,HWND,const DXSWAPDESC_*,const void*,void*,void**))(g_gpuFactory,g_gpuDev,g_gpuWnd,&d,0,0,&g_gpuSwap)<0){
+            g_gpuSwap=0;d.Effect=0;d.Count=1; /* blt model, for systems that refuse flip on this window */
+            if(COM(g_gpuFactory,15,LONG,(void*,void*,HWND,const DXSWAPDESC_*,const void*,void*,void**))(g_gpuFactory,g_gpuDev,g_gpuWnd,&d,0,0,&g_gpuSwap)<0){g_gpuSwap=0;return 0;}
+        }
+        g_gpuSwapW=dw;g_gpuSwapH=dh;
+    }else if(dw!=g_gpuSwapW||dh!=g_gpuSwapH){
+        COMREL(g_gpuRtv);
+        COM(g_gpuCtx,33,void,(void*,UINT,void* const*,void*))(g_gpuCtx,0,0,0); /* ResizeBuffers needs it unbound */
+        COM(g_gpuCtx,111,void,(void*))(g_gpuCtx);
+        if(COM(g_gpuSwap,13,LONG,(void*,UINT,UINT,UINT,UINT,UINT))(g_gpuSwap,0,(UINT)dw,(UINT)dh,0,0)<0)return 0;
+        g_gpuSwapW=dw;g_gpuSwapH=dh;
+    }
+    if(!g_gpuRtv){
+        void* back=0;
+        if(COM(g_gpuSwap,9,LONG,(void*,UINT,const void*,void**))(g_gpuSwap,0,&IID_ID3D11Texture2D_,&back)<0||!back)return 0;
+        LONG hr=COM(g_gpuDev,9,LONG,(void*,void*,const void*,void**))(g_gpuDev,back,0,&g_gpuRtv);
+        COMREL(back);
+        if(hr<0){g_gpuRtv=0;return 0;}
+    }
+    if(dx!=g_gpuDst.left||dy!=g_gpuDst.top||dx+dw!=g_gpuDst.right||dy+dh!=g_gpuDst.bottom){
+        SetWindowPos(g_gpuWnd,HWND_TOPMOST,g_tOrgX+dx,g_tOrgY+dy,dw,dh,SWP_NOACTIVATE);
+        g_gpuDst.left=dx;g_gpuDst.top=dy;g_gpuDst.right=dx+dw;g_gpuDst.bottom=dy+dh;
+        PatBlt(g_bufDC,0,0,g_tw,g_th,BLACKNESS);InvalidateRect(g_output,0,0); /* black around the picture */
+    }
+    return 1;
+}
+/* Takes a new frame if there is one; 0 when the duplication was lost (it is rebuilt later). */
+static int gpuTakeFrame(void){
+    DXFRAMEINFO_ fi;void* res=0;
+    LONG hr=COM(g_gpuDup,8,LONG,(void*,UINT,DXFRAMEINFO_*,void**))(g_gpuDup,g_gpuHasFrame?0:100,&fi,&res);
+    if(hr==DXGI_ERR_WAIT_TIMEOUT){
+        if(!g_gpuHasFrame)g_gpuNoFrame++; /* each try waited 100 ms on the UI thread */
+        return g_gpuHasFrame?1:0;
+    }
+    if(hr<0)return -1; /* access lost: mode change, lock screen, UAC */
+    void* tex=0;
+    if(fi.LastPresent!=0||!g_gpuHasFrame){
+        if(COM(res,0,LONG,(void*,const void*,void**))(res,&IID_ID3D11Texture2D_,&tex)>=0&&tex){
+            COM(g_gpuCtx,47,void,(void*,void*,void*))(g_gpuCtx,g_gpuClean,tex); /* CopyResource */
+            g_gpuHasFrame=1;g_gpuNoFrame=0;
+#ifdef GPU_STATS
+            g_gpuFrames++;
+#endif
+        }
+        COMREL(tex);
+    }
+    COMREL(res);
+    COM(g_gpuDup,14,LONG,(void*))(g_gpuDup); /* ReleaseFrame */
+    return g_gpuHasFrame?1:0;
+}
+static void gpuDrawPointer(int monLeft,int monTop){
+    if(!g_showCursor)return;
+    CURSORINFO ci={0};ci.cbSize=sizeof(ci);
+    if(!GetCursorInfo(&ci)||!(ci.flags&1))return;
+    int x=(int)ci.ptScreenPos.x-monLeft,y=(int)ci.ptScreenPos.y-monTop;
+    if(x<0||y<0||x>=g_gpuW||y>=g_gpuH)return;
+    ICONINFO info={0};int hotX=0,hotY=0;
+    if(GetIconInfo(ci.hCursor,&info)){
+        hotX=(int)info.xHotspot;hotY=(int)info.yHotspot;
+        if(info.hbmMask)DeleteObject(info.hbmMask);
+        if(info.hbmColor)DeleteObject(info.hbmColor);
+    }
+    HDC dc=0;
+    if(COM(g_gpuWorkSurf,11,LONG,(void*,BOOL,HDC*))(g_gpuWorkSurf,0,&dc)<0||!dc)return;
+    DrawIconEx(dc,x-hotX,y-hotY,(HICON)ci.hCursor,0,0,0,0,DI_NORMAL);
+    COM(g_gpuWorkSurf,12,LONG,(void*,RECT*))(g_gpuWorkSurf,0);
+}
+static void gpuRetryLater(void){gpuRelease();g_gpuRetryAt=GetTickCount()+1000;}
+/* Draws this frame on the GPU when a whole screen is shrunk or enlarged; 0 means another path has to.
+ * Enlarging takes one bilinear tap per pixel: smooth, where the magnifier and GDI repeat pixels
+ * unevenly at ratios that are not whole numbers (measured on a 1-px line pattern at 1.25 and 1.6). */
+static int gpuRender(void){
+    int want=!g_gpuFailed&&!g_srcWindow&&!g_isBlack&&!g_editFrame&&g_sourceIndex<g_monitorCount&&IsWindowVisible(g_output);
+    int fx,fy,fw,fh,sx,sy,sw,sh,dx,dy,dw,dh;
+    if(want){
+        computeFrame(&fx,&fy,&fw,&fh);pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);
+#ifdef GPU_TEST_ZOOMIN
+        sx+=sw/4;sy+=sh/4;sw/=2;sh/=2; /* test build: the centre of the screen, enlarged */
+#endif
+        want=dw!=sw||dh!=sh; /* 1:1 stays with the magnifier, which is pixel-exact there */
+    }
+    if(!want){gpuHide();return 0;}
+    if(g_gpuDev&&g_gpuSrc!=g_sourceIndex)gpuRelease();
+    if(g_gpuRetryAt){
+        if((int)(GetTickCount()-g_gpuRetryAt)<0){gpuHide();return 0;}
+        g_gpuRetryAt=0;
+    }
+    if(!g_gpuDev&&!gpuInit()){gpuRelease();g_gpuFailed=1;return 0;} /* no GPU path on this machine */
+    /* Anything that can follow a display change is rebuilt from scratch a second later:
+     * the output object itself may be stale after a mode change. */
+    if(!g_gpuDup&&!gpuDuplicate()){gpuRetryLater();return 0;}
+    int got=gpuTakeFrame();
+    if(got<0){gpuRetryLater();return 0;}
+    if(!got){
+        if(g_gpuNoFrame>=10){gpuRelease();g_gpuFailed=1;} /* a second without a first frame: give up */
+        else gpuHide();
+        return 0;
+    }
+    RECT m=g_monitors[g_sourceIndex].rcMonitor;
+    if(g_gpuW!=(int)(m.right-m.left)||g_gpuH!=(int)(m.bottom-m.top)){gpuRetryLater();return 0;} /* resolution changing */
+    if(!gpuPlace(dx,dy,dw,dh)){gpuRelease();g_gpuFailed=1;return 0;}
+    COM(g_gpuCtx,47,void,(void*,void*,void*))(g_gpuCtx,g_gpuWork,g_gpuClean);
+    gpuDrawPointer((int)m.left,(int)m.top);
+    float c[8];
+    c[0]=(float)sx/g_gpuW;c[1]=(float)sy/g_gpuH;c[2]=(float)(sx+sw)/g_gpuW;c[3]=(float)(sy+sh)/g_gpuH;
+    c[4]=(c[2]-c[0])/dw;c[5]=(c[3]-c[1])/dh;
+    int nx=(sw+dw-1)/dw,ny=(sh+dh-1)/dh;
+    c[6]=(float)MAX(1,MIN(nx,GPU_MAX_TAPS));c[7]=(float)MAX(1,MIN(ny,GPU_MAX_TAPS));
+    void* ctx=g_gpuCtx;
+    COM(ctx,48,void,(void*,void*,UINT,const void*,const void*,UINT,UINT))(ctx,g_gpuCb,0,0,c,0,0); /* UpdateSubresource */
+    COM(ctx,33,void,(void*,UINT,void* const*,void*))(ctx,1,&g_gpuRtv,0);                         /* OMSetRenderTargets */
+    DXVIEWPORT_ vp;vp.X=0;vp.Y=0;vp.W=(float)dw;vp.H=(float)dh;vp.MinD=0;vp.MaxD=1;
+    COM(ctx,44,void,(void*,UINT,const DXVIEWPORT_*))(ctx,1,&vp);                                  /* RSSetViewports */
+    COM(ctx,17,void,(void*,void*))(ctx,0);                                                        /* IASetInputLayout */
+    COM(ctx,24,void,(void*,UINT))(ctx,4);                                                         /* triangle list */
+    COM(ctx,11,void,(void*,void*,void* const*,UINT))(ctx,g_gpuVs,0,0);                           /* VSSetShader */
+    COM(ctx,7,void,(void*,UINT,UINT,void* const*))(ctx,0,1,&g_gpuCb);                             /* VSSetConstantBuffers */
+    COM(ctx,9,void,(void*,void*,void* const*,UINT))(ctx,g_gpuPs,0,0);                            /* PSSetShader */
+    COM(ctx,16,void,(void*,UINT,UINT,void* const*))(ctx,0,1,&g_gpuCb);                            /* PSSetConstantBuffers */
+    COM(ctx,8,void,(void*,UINT,UINT,void* const*))(ctx,0,1,&g_gpuWorkSrv);                        /* PSSetShaderResources */
+    COM(ctx,10,void,(void*,UINT,UINT,void* const*))(ctx,0,1,&g_gpuSamp);                          /* PSSetSamplers */
+    COM(ctx,13,void,(void*,UINT,UINT))(ctx,3,0);                                                  /* Draw */
+    void* none=0;
+    COM(ctx,8,void,(void*,UINT,UINT,void* const*))(ctx,0,1,&none); /* unbind: the copy is written again next frame */
+    LONG hr=COM(g_gpuSwap,8,LONG,(void*,UINT,UINT))(g_gpuSwap,0,0);                              /* Present */
+    if(hr<0){gpuRelease();g_gpuFailed=1;return 0;}
+    if(!g_gpuShown){ShowWindow(g_gpuWnd,SW_SHOWNA);g_gpuShown=1;}
+    if(g_magShown){ShowWindow(g_mag,SW_HIDE);g_magShown=0;}
+#ifdef GPU_STATS
+    g_gpuPresents++;
+    if((int)(GetTickCount()-g_gpuStatsAt)>=1000){
+        WCHAR t[64];copyw(t,W("gpu "),64);intw(t+lenw(t),g_gpuPresents);copyw(t+lenw(t),W(" presents, "),64-lenw(t));
+        intw(t+lenw(t),g_gpuFrames);copyw(t+lenw(t),W(" frames/s"),64-lenw(t));SetWindowTextW(g_main,t);
+        g_gpuPresents=g_gpuFrames=0;g_gpuStatsAt=GetTickCount();
+    }
+#endif
+    return 1;
+}
 static void render(void){
     if(!g_isRunning||!g_bufDC)return;
+    if(gpuRender())return;
     if(magRender())return;
     if(!g_isBlack)captureSource();
     compose();
@@ -1113,7 +1423,7 @@ static int startOutput(void){
     magCreate();
     SetWindowPos(g_output,HWND_TOPMOST,t.left,t.top,g_tw,g_th,SWP_NOACTIVATE|SWP_SHOWWINDOW);
     g_isRunning=1;g_isBlack=0;
-    render();SetTimer(g_output,1,g_magShown?MAG_FRAME_MS:FRAME_MIN_MS,0);g_frameMs=g_magShown?MAG_FRAME_MS:FRAME_MIN_MS;
+    render();SetTimer(g_output,1,(g_magShown||g_gpuShown)?MAG_FRAME_MS:FRAME_MIN_MS,0);g_frameMs=(g_magShown||g_gpuShown)?MAG_FRAME_MS:FRAME_MIN_MS;
     refreshRunState();
     status(g_hotkey==1?L("Proyección activa. Parada de emergencia: Ctrl + Alt + P.","Projecting. Emergency stop: Ctrl + Alt + P."):
            g_hotkey==2?L("Proyección activa. Parada de emergencia: Ctrl + Alt + Mayús + P (Ctrl + Alt + P la usa otro programa).","Projecting. Emergency stop: Ctrl + Alt + Shift + P (another program uses Ctrl + Alt + P)."):
@@ -1184,7 +1494,7 @@ static LRESULT __stdcall outputProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     switch(msg){
     case WM_TIMER:if(w==1){
         DWORD t0=GetTickCount();render();
-        if(g_magShown){if(g_frameMs!=MAG_FRAME_MS){g_frameMs=MAG_FRAME_MS;SetTimer(g_output,1,MAG_FRAME_MS,0);}}
+        if(g_magShown||g_gpuShown){if(g_frameMs!=MAG_FRAME_MS){g_frameMs=MAG_FRAME_MS;SetTimer(g_output,1,MAG_FRAME_MS,0);}}
         else adaptFrameRate(GetTickCount()-t0);
     }return 0;
     case WM_ERASEBKGND:return 1;
@@ -2562,6 +2872,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
          * so it can never cover the panel, and decide once things have settled. */
         if(g_switching)return 0;
         dismissIds();
+        gpuRelease(); /* its window is not hidden with the output window */
         if(g_output)ShowWindow(g_output,SW_HIDE);
         SetTimer(hwnd,ID_DISPLAY_SETTLE,700,0);
         return 0;
