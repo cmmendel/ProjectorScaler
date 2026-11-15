@@ -114,6 +114,7 @@ API(BOOL,IsIconic,(HWND));
 API(BOOL,PrintWindow,(HWND,HDC,UINT));
 API(int,SetScrollInfo,(HWND,int,const void*,BOOL));
 API(HWND,SetFocus,(HWND));
+IN(HANDLE __stdcall ShellExecuteW(HWND,const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR*,int));
 API(BOOL,ClientToScreen,(HWND,POINT*));
 /* dwmapi */
 API(LONG,DwmGetWindowAttribute,(HWND,DWORD,void*,DWORD));
@@ -193,6 +194,7 @@ API(BOOL,SetBrushOrgEx,(HDC,int,int,POINT*));
 #define SIF_PAGE 2u
 #define SIF_POS 4u
 #define DT_NOPREFIX 0x0800u
+#define DT_CALCRECT 0x0400u
 #define DT_END_ELLIPSIS 0x8000u
 typedef struct {UINT cbSize,fMask;int nMin,nMax;UINT nPage;int nPos,nTrackPos;} SCROLLINFO;
 #define MAXTILES 64
@@ -381,6 +383,8 @@ static int g_tileCount=0,g_thumbNext=0,g_tileScroll=0,g_tileTab=0,g_tabCount=-1;
 static int g_srcKind=TILE_SCREEN; /* what g_srcWindow is when it is set: a window or a browser tab */
 static HWND g_tilesWnd,g_tabBtn[3],g_srcHint;
 static WCHAR g_srcTabTitle[128];
+static RECT g_linkRect; /* "Colegio Mayor Mendel" in the footer, a link to cmmendel.com */
+static int g_overLink=0;
 static const WCHAR* g_tabError=0; /* why the Pestañas tab is empty, when it is not just "no tabs" */
 static void fillTiles(void);
 static void tilesClear(void);
@@ -1124,11 +1128,31 @@ static void buildDate(WCHAR* out,int cap){
         if(mon<10)appendw(out,W("0"),cap);appendi(out,mon,cap);appendw(out,W("/"),cap);appendw(out,y,cap);
     }
 }
-static void creditText(WCHAR* out,int cap){
+static void creditTail(WCHAR* out,int cap){
     WCHAR date[32];buildDate(date,32);out[0]=0;
-    appendw(out,L("Versión desarrollada por Claude Code para Colegio Mayor Mendel  ·  compilada el ",
-                  "Version developed by Claude Code for Colegio Mayor Mendel  ·  built on "),cap);
-    appendw(out,date,cap);
+    appendw(out,L("  ·  compilado el ","  ·  built on "),cap);appendw(out,date,cap);
+}
+/* Small centred footer: "Desarrollado con Claude Code para <Colegio Mayor Mendel> · compilado el ...",
+ * the college's name underlined and clickable. Remembers where the link was drawn. */
+static void paintCredit(HDC dc,int left,int top,int right,int bottom){
+    int px=MAX(9,S(11));
+    HFONT plain=CreateFontW(-px,0,0,0,400,0,0,0,1,0,0,0,0,W("Segoe UI"));
+    HFONT link=CreateFontW(-px,0,0,0,400,0,1,0,1,0,0,0,0,W("Segoe UI"));
+    const WCHAR* head=L("Desarrollado con Claude Code para ","Developed with Claude Code for ");
+    const WCHAR* name=W("Colegio Mayor Mendel");
+    WCHAR tail[64];creditTail(tail,64);
+    const WCHAR* part[3]={head,name,tail};HFONT font[3]={plain,link,plain};int w[3];
+    HGDIOBJ old=SelectObject(dc,plain);
+    for(int i=0;i<3;i++){RECT m={0,0,0,0};SelectObject(dc,font[i]);DrawTextW(dc,part[i],-1,&m,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);w[i]=(int)m.right;}
+    int x=(left+right-(w[0]+w[1]+w[2]))/2;
+    for(int i=0;i<3;i++){
+        RECT r={x,top,x+w[i],bottom};SelectObject(dc,font[i]);
+        SetTextColor(dc,i==1?RGB3(26,107,181):RGB3(96,110,128));
+        DrawTextW(dc,part[i],-1,&r,DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+        if(i==1){g_linkRect=r;}
+        x+=w[i];
+    }
+    SelectObject(dc,old);DeleteObject(plain);DeleteObject(link);
 }
 static const WCHAR* hotkeyHint(void){
     return g_hotkey==1?L("Ctrl + Alt + P detiene la proyección al instante.","Ctrl + Alt + P stops the projection at once."):
@@ -1489,9 +1513,7 @@ static void paintMain(HWND hwnd){
     }else{
         paintCard(dc,20,75,737,232);paintCard(dc,20,313,737,100);paintCard(dc,20,419,737,216);paintCard(dc,20,642,737,129);paintCard(dc,20,777,737,122);
     }
-    WCHAR credit[200];creditText(credit,200);
-    RECT foot={S(20),S(BASE_CH-28),S(757),S(BASE_CH-6)};SetTextColor(dc,RGB3(96,110,128));
-    DrawTextW(dc,credit,-1,&foot,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+    paintCredit(dc,S(20),S(BASE_CH-26),S(757),S(BASE_CH-8));
     SelectObject(dc,oldFont);
     EndPaint(hwnd,&ps);
 }
@@ -1825,6 +1847,21 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     case WM_HOTKEY:
         if(w==ID_EMERGENCY){dismissIds();stopOutput();restoreIfNeeded();status(L("Parada de emergencia.","Emergency stop."));return 0;}
         break;
+    case WM_MOUSEMOVE:{
+        int x=(int)(short)(l&0xffff),y=(int)(short)((l>>16)&0xffff);
+        g_overLink=x>=g_linkRect.left&&x<g_linkRect.right&&y>=g_linkRect.top&&y<g_linkRect.bottom;
+        if(g_overLink)SetCursor(LoadCursorW(0,IDC_HAND));
+        return 0;
+    }
+    case WM_SETCURSOR:
+        if(g_overLink&&(HWND)w==hwnd&&(l&0xffff)==1){SetCursor(LoadCursorW(0,IDC_HAND));return 1;} /* HTCLIENT */
+        break;
+    case WM_LBUTTONUP:{
+        int x=(int)(short)(l&0xffff),y=(int)(short)((l>>16)&0xffff);
+        if(x>=g_linkRect.left&&x<g_linkRect.right&&y>=g_linkRect.top&&y<g_linkRect.bottom)
+            ShellExecuteW(hwnd,W("open"),W("https://cmmendel.com"),0,0,1);
+        return 0;
+    }
     case WM_PAINT:paintMain(hwnd);return 0;
     case WM_ERASEBKGND:return 1;
     case WM_DRAWITEM:drawButton((const void*)l);return 1;
