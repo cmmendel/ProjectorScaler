@@ -442,7 +442,7 @@ static int refreshMonitors(void){
     }
     /* In DUPLICAR there is one desktop, so source and target are saved as the same device;
      * after the switch to EXTENDER that must not count as a kept target. */
-    if(matchedT&&g_targetIndex==g_sourceIndex)matchedT=0;
+    if(matchedT&&!g_srcWindow&&g_targetIndex==g_sourceIndex)matchedT=0;
     if(!matchedT&&g_monitorCount>1){
         int ctl=controllingIndex(),pick=-1;
         for(int i=0;i<g_monitorCount&&pick<0;i++)if(i!=g_sourceIndex&&i!=ctl)pick=i;

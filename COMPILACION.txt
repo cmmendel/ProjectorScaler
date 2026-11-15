@@ -5,16 +5,17 @@ Enlazador:  lld-link 17
 Sin CRT, paquetes externos ni SDK de Windows.
 
 El archivo ProjectorScalerPortable.c declara las interfaces Win32 utilizadas.
-Se generan tres bibliotecas de importacion a partir de los archivos
-kernel32.def, user32.def y gdi32.def. (Se incluyen en fuentes.)
+Se generan cuatro bibliotecas de importacion a partir de los archivos
+kernel32.def, user32.def, gdi32.def y dwmapi.def. (Se incluyen en fuentes.)
 
 Comandos:
   cd build
   lld-link /dll /noentry /def:kernel32.def /out:kernel32.dll /implib:kernel32.lib
   lld-link /dll /noentry /def:user32.def /out:user32.dll /implib:user32.lib
   lld-link /dll /noentry /def:gdi32.def /out:gdi32.dll /implib:gdi32.lib
+  lld-link /dll /noentry /def:dwmapi.def /out:dwmapi.dll /implib:dwmapi.lib
   clang --target=x86_64-pc-windows-msvc -O2 -c -ffreestanding -fno-builtin -Wall -Wextra ../ProjectorScalerPortable.c -o ProjectorScalerPortable.obj
-  lld-link /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj kernel32.lib user32.lib gdi32.lib
+  lld-link /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib dwmapi.lib
 
 Nota: los DLL generados en build son *marcadores* solo para crear las
 bibliotecas de importacion, NO se distribuyen ni se ejecutan en Windows.
@@ -36,3 +37,8 @@ biblioteca estándar de Python; ProjectorScaler.rc lo incrusta en el EXE.
 build-native.sh compila el recurso con llvm-rc (o zig rc) y lo enlaza.
 En Windows con ziglang: CLANG, LLD_LINK y RC apuntan a envoltorios que llaman a
 "python -m ziglang clang", "... lld-link" y "... rc".
+
+GITHUB ACTIONS
+.github/workflows/build.yml compila en Ubuntu con ziglang 0.17.1 (las variables
+CLANG, LLD_LINK y RC valen "python -m ziglang ...") y comprueba en Windows que
+el EXE arranca y sigue vivo 8 segundos.

@@ -1,0 +1,49 @@
+name: Build and smoke test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the zig toolchain (clang, lld-link, rc)
+        run: python -m pip install ziglang==0.17.1
+      - name: Compile Windows executable
+        env:
+          CLANG: python -m ziglang clang
+          LLD_LINK: python -m ziglang lld-link
+          RC: python -m ziglang rc
+        run: bash build-native.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProjectorScaler-windows-x64
+          path: ProjectorScalerPortable.exe
+          if-no-files-found: error
+  smoke-test:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProjectorScaler-windows-x64
+      - name: Check application starts and stays running
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "$PWD/ProjectorScalerPortable.exe" -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Application exited during startup with code $($process.ExitCode)"
+            }
+            Write-Host "Application remained running for 8 seconds (PID $($process.Id))."
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
