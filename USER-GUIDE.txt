@@ -141,25 +141,30 @@ STATUS / LIMITS
   real Windows 11 desktop with two screens, but NOT yet with an HDMI projector,
   and the projection itself (including the Duplicate/Extend switch and tab
   projection) has not been run in those checks.
-- A whole screen (Basic mode, or the Screens tab) shown at full size or larger
-  is mirrored by the Windows magnifier, which the graphics card draws at the
-  screen's refresh rate (measured: about 56 frames per second on a 60 Hz screen,
-  in a small test window): meant for video. It is not yet checked on a
+- A whole screen (Basic mode, or the Screens tab) shown at exactly full size
+  (1:1) is mirrored by the Windows magnifier, which the graphics card draws at
+  the screen's refresh rate (measured: about 56 frames per second on a 60 Hz
+  screen, in a small test window): meant for video. It is not yet checked on a
   projector. If the magnifier is not available, the app falls back to the slow
   capture below.
 - A whole screen made SMALLER (the usual case) is copied by the graphics card
   (Windows desktop duplication) and shrunk by averaging every pixel it covers,
-  so small text keeps its strokes. Measured on a 60 Hz screen: about 60 frames
-  per second shown, 51-58 new frames per second with moving content, at sizes
-  from 20 % to 80 %. The magnifier is not used for this: it shrinks by dropping
-  whole rows and columns. If the graphics card path is not available (no
-  DirectX 10 card, a remote desktop session), the app falls back to the slow
-  capture below, which also averages. While Windows is locked or a UAC prompt
-  is on screen the picture freezes and resumes about a second later.
-- A single window or browser tab, Black screen, and adjusting the frame with the
-  mouse use GDI capture: about 13-20 frames per second (measured: 37 ms per
-  1920x1080 frame), down to 4 if the computer cannot keep up. Fine for slides
-  and pages, not for video.
+  so small text keeps its strokes. Made LARGER (a projector with more pixels
+  than the screen) it is enlarged smoothly, instead of repeating some pixels
+  twice and others once. Measured on a 60 Hz screen: about 60 frames per second
+  shown, 51-58 new frames per second with moving content, at sizes from 20 % to
+  80 % and enlarged 1.6 times. The magnifier is not used for this: it shrinks
+  by dropping whole rows and columns, and enlarges by repeating pixels. If the
+  graphics card path is not available (no DirectX 10 card, a remote desktop
+  session), the app falls back to the slow capture below, which also averages.
+  While Windows is locked or a UAC prompt is on screen the picture freezes and
+  resumes about a second later.
+- A single window or browser tab, Black screen, and adjusting the frame with
+  the mouse use GDI capture, which averages when it shrinks but repeats pixels
+  when it enlarges (a small window shown large looks blockier than a whole
+  screen): about 13-20 frames per second (measured: 37 ms per 1920x1080 frame),
+  down to 4 if the computer cannot keep up. Fine for slides and pages, not for
+  video.
 - The sound does not go through the app; Windows plays it as usual.
 - Protected video (Netflix and similar, DRM) shows black on the projector.
 - Does not touch audio and does not switch the projector's lamp off.
@@ -168,9 +173,11 @@ STATUS / LIMITS
 - Identifying and switching layouts with more than two screens is not validated.
 - The graphics card path (2.4) was measured on a Windows 11 desktop with two
   screens: a 1-px line pattern averaged correctly at 80, 60, 50, 30 and 20 %,
-  about 60 frames per second, the frame dragged while projecting, and both the
-  arrow and the text pointer drawn. Locking Windows, a UAC prompt, Win + P and a
-  resolution change while projecting were not tried.
+  and interpolated when enlarged 1.6 times (a test build, since both screens
+  here have the same resolution), about 60 frames per second, the frame dragged
+  while projecting, and both the arrow and the text pointer drawn. Locking
+  Windows, a UAC prompt, Win + P and a resolution change while projecting were
+  not tried.
 - Updates (2.3) were checked against a local stand-in for GitHub: prompt,
   download through a redirect, swap and restart, a corrupt download, a
   read-only folder and no network. Against the real GitHub only the "no
@@ -182,8 +189,9 @@ STATUS / LIMITS
 
 CHANGES IN 2.4
 - A smaller picture of a whole screen keeps its definition: the graphics card
-  shrinks it by averaging pixels, at the screen's refresh rate. The magnifier,
-  which dropped rows and columns, is kept only for full size or larger.
+  shrinks it by averaging pixels, at the screen's refresh rate, and enlarges it
+  smoothly. The magnifier, which dropped rows and columns, is kept only for
+  exactly full size.
 
 CHANGES IN 2.3
 - Options menu (gear): start with Windows, check for updates at startup, and

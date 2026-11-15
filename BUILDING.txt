@@ -74,7 +74,8 @@ the COM methods are called by vtable index (the COM macro), checked against
 MinGW's dxgi.h, dxgi1_2.h and d3d11.h. The shader is compiled when projection
 starts by d3dcompiler_47.dll, loaded from System32 only. Building with
 -DGPU_STATS puts the presents and new frames per second in the panel's title
-bar, to measure it.
+bar, to measure it; adding -DGPU_TEST_ZOOMIN shows the centre half of the
+source screen, to test enlarging on two screens of the same resolution.
 
 TESTING THE UPDATER WITHOUT GITHUB
 Compiling with -DUPD_TEST_PORT=8765 makes the update check use plain HTTP on

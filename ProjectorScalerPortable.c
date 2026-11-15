@@ -957,7 +957,8 @@ static int magRender(void){
     int sx,sy,sw,sh,dx,dy,dw,dh;pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);
     /* The magnifier point-samples when it shrinks: measured on a 1-px line pattern, it keeps
      * only pure black and white at 0.8 and 0.6 and the lines vanish at 0.5. Shrinking goes to
-     * the GDI path (HALFTONE averages); the magnifier keeps 1:1 and enlarging. */
+     * the GDI path (HALFTONE averages); the magnifier keeps 1:1, and enlarging when the GPU
+     * path is not available. */
     if(dw<sw||dh<sh){
         if(g_magShown){ShowWindow(g_mag,SW_HIDE);g_magShown=0;}
         return 0;
@@ -984,7 +985,7 @@ static int magRender(void){
     if(!g_magShown){ShowWindow(g_mag,SW_SHOWNA);g_magShown=1;}
     return 1;
 }
-/* ---- GPU path: a shrunk whole screen at the refresh rate, without dropping pixels ----
+/* ---- GPU path: a scaled whole screen at the refresh rate, without dropping pixels ----
  * DXGI Desktop Duplication hands over each new frame of the source screen as a GPU texture.
  * It is copied (the pointer is drawn on the copy with GDI: duplication leaves it out) and a
  * pixel shader shrinks it, averaging every source pixel under each projector pixel (a box
@@ -1212,11 +1213,19 @@ static void gpuDrawPointer(int monLeft,int monTop){
     COM(g_gpuWorkSurf,12,LONG,(void*,RECT*))(g_gpuWorkSurf,0);
 }
 static void gpuRetryLater(void){gpuRelease();g_gpuRetryAt=GetTickCount()+1000;}
-/* Draws this frame on the GPU when the picture is a shrunk whole screen; 0 means another path has to. */
+/* Draws this frame on the GPU when a whole screen is shrunk or enlarged; 0 means another path has to.
+ * Enlarging takes one bilinear tap per pixel: smooth, where the magnifier and GDI repeat pixels
+ * unevenly at ratios that are not whole numbers (measured on a 1-px line pattern at 1.25 and 1.6). */
 static int gpuRender(void){
     int want=!g_gpuFailed&&!g_srcWindow&&!g_isBlack&&!g_editFrame&&g_sourceIndex<g_monitorCount&&IsWindowVisible(g_output);
     int fx,fy,fw,fh,sx,sy,sw,sh,dx,dy,dw,dh;
-    if(want){computeFrame(&fx,&fy,&fw,&fh);pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);want=dw<sw||dh<sh;}
+    if(want){
+        computeFrame(&fx,&fy,&fw,&fh);pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);
+#ifdef GPU_TEST_ZOOMIN
+        sx+=sw/4;sy+=sh/4;sw/=2;sh/=2; /* test build: the centre of the screen, enlarged */
+#endif
+        want=dw!=sw||dh!=sh; /* 1:1 stays with the magnifier, which is pixel-exact there */
+    }
     if(!want){gpuHide();return 0;}
     if(g_gpuDev&&g_gpuSrc!=g_sourceIndex)gpuRelease();
     if(g_gpuRetryAt){
