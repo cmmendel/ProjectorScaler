@@ -13,3 +13,10 @@ EXPORTS
  QueryFullProcessImageNameW
  CloseHandle
  Sleep
+ CreateThread
+ CreateFileW
+ WriteFile
+ MoveFileExW
+ DeleteFileW
+ GetCommandLineW
+ CreateProcessW

@@ -1,0 +1,77 @@
+name: Release
+# Pushing a tag v<version> publishes a GitHub release with ProjectorScalerPortable.exe
+# attached: the asset the app's update check downloads. The tag must equal APP_VERSION
+# in the source, or an updated EXE would still report the old version and offer the
+# same update forever.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches APP_VERSION
+        run: |
+          version=$(sed -n 's/^#define APP_VERSION L"\([0-9.]*\)".*/\1/p' ProjectorScalerPortable.c)
+          echo "APP_VERSION=$version tag=$GITHUB_REF_NAME"
+          if [ -z "$version" ] || [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match APP_VERSION $version"
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the zig toolchain (clang, lld-link, rc)
+        run: python -m pip install ziglang==0.17.1
+      - name: Compile Windows executable
+        env:
+          CLANG: python -m ziglang clang
+          LLD_LINK: python -m ziglang lld-link
+          RC: python -m ziglang rc
+        run: bash build-native.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProjectorScaler-release
+          path: ProjectorScalerPortable.exe
+          if-no-files-found: error
+  smoke-test:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProjectorScaler-release
+      - name: Check application starts and stays running
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "$PWD/ProjectorScalerPortable.exe" -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Application exited during startup with code $($process.ExitCode)"
+            }
+            Write-Host "Application remained running for 8 seconds (PID $($process.Id))."
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+  publish:
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProjectorScaler-release
+      - name: Create the release with the EXE attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" ProjectorScalerPortable.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "ProjectorScaler ${GITHUB_REF_NAME#v}" \
+            --generate-notes

@@ -1,4 +1,4 @@
-PROJECTORSCALER PORTABLE 2.2 — Windows 10/11 (x64)
+PROJECTORSCALER PORTABLE 2.3 — Windows 10/11 (x64)
 ==================================================
 
 WHAT IT DOES
@@ -32,6 +32,8 @@ For the usual case: the projector shows the same as your screen, made smaller.
 3. Press PROJECT. If Windows is in Duplicate, the app switches to Extend while
    it projects, without asking, and always goes back to Duplicate when you press
    STOP.
+4. While projecting, BLACK SCREEN turns the picture black with HDMI still on;
+   press it again (Resume picture) to bring the picture back.
 
 ADVANCED MODE
 Everything else, in four sections.
@@ -100,6 +102,27 @@ needed. If another program already uses Ctrl + Alt + P, the key becomes
 Ctrl + Alt + Shift + P; the panel always says which one is active, or warns if
 there is none.
 
+OPTIONS (THE GEAR AT THE TOP RIGHT)
+- Start with Windows: opens ProjectorScaler when you sign in to Windows. It is
+  off until you switch it on. It writes a value named ProjectorScaler under
+  HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run that starts
+  this EXE, so it is per user and needs no administrator rights. If you move
+  the EXE, the tick goes off: switch it on again from the new copy. Switching
+  it on here also clears a switch-off made in Task Manager > Startup apps.
+- Check for updates at startup (on by default): a few seconds after opening
+  (half a minute when started with Windows) the app asks GitHub for the latest
+  release of cmmendel/ProjectorScaler. If there is a newer version, it asks
+  whether to download and install it; nothing is downloaded unless you say
+  yes. If you are projecting, it asks when the projection stops. Without
+  Internet, or if GitHub does not answer, it says nothing and tries once more
+  two minutes later.
+- Check for updates now: the same check, with an answer either way.
+Installing: the new EXE is downloaded next to the current one (as
+<name>.exe.new), checked to be a 64-bit Windows program, and swapped in under
+the same name; the old copy is kept as <name>.exe.old until the next start. The
+app closes and opens again with the new version, keeping ProjectorScaler.ini.
+If the folder cannot be written, the app offers the download page instead.
+
 ABOUT DUPLICATE MODE
 In Duplicate, Windows shows the same picture on both outputs, so the projector
 can only be made smaller with extended outputs. ProjectorScaler switches to
@@ -110,7 +133,8 @@ the next time it opens.
 
 SETTINGS FILE
 Everything is saved in ProjectorScaler.ini next to the EXE, so the folder must
-be writable. The app warns if it cannot write it.
+be writable. The app warns if it cannot write it. CheckUpdates=0 in [Settings]
+switches off the check at startup.
 
 STATUS / LIMITS
 - Builds without warnings (clang 22, -Wall -Wextra). It has been checked on a
@@ -134,6 +158,13 @@ STATUS / LIMITS
 - Identifying and switching layouts with more than two screens is not validated.
 - On a 1366 x 768 laptop the Advanced panel is scaled down to fit, to about
   three quarters of its normal size.
+
+CHANGES IN 2.3
+- Options menu (gear): start with Windows, check for updates at startup, and
+  check now.
+- Updates from GitHub releases, installed only after you confirm.
+- Basic mode has the Black screen button.
+- The version is shown in the footer and in the title bar.
 
 CHANGES IN 2.2
 - Basic mode: mirror your screen and size it on the projector with the mouse.
@@ -162,5 +193,5 @@ CHANGES IN 2.1
   on the projector; own icon in the taskbar and the EXE.
 
 VERSION
-ProjectorScaler Portable 2.2 — native Win32/GDI, built with clang/lld for
+ProjectorScaler Portable 2.3 — native Win32/GDI, built with clang/lld for
 Windows x86_64 (see BUILDING.txt).

@@ -6,7 +6,7 @@ No CRT, no external packages and no Windows SDK.
 
 ProjectorScalerPortable.c declares every Win32 interface it uses. Import
 libraries are made from the .def files in build/ (kernel32, user32, gdi32,
-dwmapi, shell32, ole32, oleaut32, magnification), which list only the functions the program
+dwmapi, shell32, ole32, oleaut32, magnification, advapi32, winhttp), which list only the functions the program
 imports. The DLLs lld-link writes next to them are placeholders used only to
 produce the .lib files; they are never shipped or run. The EXE imports the real
 Windows DLLs.
@@ -19,11 +19,11 @@ llvm-rc on PATH; elsewhere set CLANG, LLD_LINK and RC (see the Windows section).
 
 BY HAND
   cd build
-  for each of kernel32 user32 gdi32 dwmapi shell32 ole32 oleaut32 magnification:
+  for each of kernel32 user32 gdi32 dwmapi shell32 ole32 oleaut32 magnification advapi32 winhttp:
     lld-link /machine:x64 /dll /noentry /def:NAME.def /out:NAME.dll /implib:NAME.lib
   llvm-rc /fo ProjectorScaler.res ../ProjectorScaler.rc
   clang --target=x86_64-pc-windows-msvc -O2 -c -ffreestanding -fno-builtin -Wall -Wextra ../ProjectorScalerPortable.c -o ProjectorScalerPortable.obj
-  lld-link /machine:x64 /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib dwmapi.lib shell32.lib ole32.lib oleaut32.lib magnification.lib
+  lld-link /machine:x64 /subsystem:windows /nodefaultlib /entry:mainCRTStartup /out:../ProjectorScalerPortable.exe ProjectorScalerPortable.obj ProjectorScaler.res kernel32.lib user32.lib gdi32.lib dwmapi.lib shell32.lib ole32.lib oleaut32.lib magnification.lib advapi32.lib winhttp.lib
 
 ADDING A WIN32 FUNCTION
 Declare it in ProjectorScalerPortable.c with the API(return,name,(args)) macro
@@ -55,3 +55,22 @@ GITHUB ACTIONS
 .github/workflows/build.yml builds on Ubuntu with ziglang 0.17.1 (CLANG,
 LLD_LINK and RC set to "python -m ziglang ...") and checks on Windows that the
 EXE starts and stays running for 8 seconds.
+
+RELEASES (WHAT THE APP UPDATES FROM)
+The app's update check reads the latest GitHub release of cmmendel/ProjectorScaler
+and downloads its asset ProjectorScalerPortable.exe. To publish a version:
+  1. Set APP_VERSION in ProjectorScalerPortable.c (e.g. L"2.4"), commit, merge.
+  2. Tag that commit v<APP_VERSION> and push the tag:
+       git tag v2.4 && git push origin v2.4
+.github/workflows/release.yml then refuses a tag that differs from APP_VERSION
+(an updated EXE would otherwise keep offering the same update), builds, runs the
+smoke test and creates the release with the EXE attached. Drafts and
+pre-releases are not offered to the app; a release without the EXE is reported
+only by "Check for updates now".
+
+TESTING THE UPDATER WITHOUT GITHUB
+Compiling with -DUPD_TEST_PORT=8765 makes the update check use plain HTTP on
+127.0.0.1:8765 for both the release query and the download, with the same paths
+as GitHub (/repos/cmmendel/ProjectorScaler/releases/latest and
+/cmmendel/ProjectorScaler/releases/download/<tag>/ProjectorScalerPortable.exe).
+Never ship such a build.
