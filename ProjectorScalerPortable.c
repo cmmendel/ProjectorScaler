@@ -2123,7 +2123,7 @@ static DWORD __stdcall checkThread(void* arg){
 static int downloadLooksRight(void){
     if(g_dlSize<32768||g_dlHead[0]!='M'||g_dlHead[1]!='Z')return 0;
     DWORD pe=(DWORD)g_dlHead[0x3C]|((DWORD)g_dlHead[0x3D]<<8)|((DWORD)g_dlHead[0x3E]<<16)|((DWORD)g_dlHead[0x3F]<<24);
-    if(pe+6>sizeof(g_dlHead))return 0;
+    if(pe>sizeof(g_dlHead)-6)return 0; /* written so a huge e_lfanew cannot wrap */
     return g_dlHead[pe]=='P'&&g_dlHead[pe+1]=='E'&&!g_dlHead[pe+2]&&!g_dlHead[pe+3]&&g_dlHead[pe+4]==0x64&&g_dlHead[pe+5]==0x86; /* x64 */
 }
 static DWORD __stdcall fetchThread(void* arg){

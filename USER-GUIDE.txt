@@ -156,6 +156,12 @@ STATUS / LIMITS
 - The EXE is not code-signed; SmartScreen may warn on first run.
 - Windows 10 before 1703 is not supported.
 - Identifying and switching layouts with more than two screens is not validated.
+- Updates (2.3) were checked against a local stand-in for GitHub: prompt,
+  download through a redirect, swap and restart, a corrupt download, a
+  read-only folder and no network. Against the real GitHub only the "no
+  release yet" answer has been seen; the first real download will be the first
+  release published with release.yml. The waits while projecting, and Black
+  screen in Basic mode, have not been run on a live projection.
 - On a 1366 x 768 laptop the Advanced panel is scaled down to fit, to about
   three quarters of its normal size.
 
