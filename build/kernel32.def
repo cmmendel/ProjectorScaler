@@ -8,3 +8,4 @@ EXPORTS
  GetPrivateProfileSectionNamesW
  WritePrivateProfileStringW
  GetTickCount
+ GetUserDefaultUILanguage
