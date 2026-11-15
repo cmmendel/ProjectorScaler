@@ -1008,7 +1008,7 @@ typedef struct {float X,Y,W,H,MinD,MaxD;} DXVIEWPORT_;
 typedef LONG (__stdcall *D3DCompileFn)(const void*,SIZE_T,const char*,const void*,void*,const char*,const char*,UINT,UINT,void**,void**);
 API(LONG,CreateDXGIFactory1,(const void*,void**));
 API(LONG,D3D11CreateDevice,(void*,int,void*,UINT,const int*,UINT,UINT,void**,int*,void**));
-API(void*,LoadLibraryW,(const WCHAR*));
+API(void*,LoadLibraryExW,(const WCHAR*,HANDLE,DWORD));
 API(void*,GetProcAddress,(void*,const char*));
 #define WS_EX_TRANSPARENT 0x20
 #define WS_DISABLED 0x08000000
@@ -1022,7 +1022,7 @@ static void *g_gpuClean=0,*g_gpuWork=0,*g_gpuWorkSrv=0,*g_gpuWorkSurf=0;
 static void *g_gpuSwap=0,*g_gpuRtv=0,*g_gpuVs=0,*g_gpuPs=0,*g_gpuCb=0,*g_gpuSamp=0;
 static HWND g_gpuWnd=0;
 static int g_gpuFailed=0;
-static int g_gpuShown=0,g_gpuSrc=-1,g_gpuW=0,g_gpuH=0,g_gpuSwapW=0,g_gpuSwapH=0,g_gpuHasFrame=0;
+static int g_gpuNoFrame=0,g_gpuShown=0,g_gpuSrc=-1,g_gpuW=0,g_gpuH=0,g_gpuSwapW=0,g_gpuSwapH=0,g_gpuHasFrame=0;
 static RECT g_gpuDst;
 static DWORD g_gpuRetryAt=0;
 #ifdef GPU_STATS
@@ -1054,7 +1054,7 @@ static void gpuRelease(void){
     if(g_gpuCtx){COM(g_gpuCtx,110,void,(void*))(g_gpuCtx);COM(g_gpuCtx,111,void,(void*))(g_gpuCtx);} /* ClearState, Flush */
     COMREL(g_gpuCtx);COMREL(g_gpuDev);COMREL(g_gpuFactory);
     if(g_gpuWnd){DestroyWindow(g_gpuWnd);g_gpuWnd=0;}
-    g_gpuSrc=-1;g_gpuSwapW=g_gpuSwapH=0;g_gpuRetryAt=0;
+    g_gpuSrc=-1;g_gpuSwapW=g_gpuSwapH=0;g_gpuRetryAt=0;g_gpuNoFrame=0;
 }
 static void* gpuCompile(D3DCompileFn compile,const char* entry,const char* target){
     void *code=0,*err=0;
@@ -1085,7 +1085,7 @@ static int gpuInit(void){
         COMREL(adapter);
     }
     if(!g_gpuOutput||!g_gpuDev)return 0;
-    void* lib=LoadLibraryW(W("d3dcompiler_47.dll"));
+    void* lib=LoadLibraryExW(W("d3dcompiler_47.dll"),0,0x800); /* System32 only, never the EXE's folder */
     D3DCompileFn compile=lib?(D3DCompileFn)GetProcAddress(lib,"D3DCompile"):0;
     if(!compile)return 0;
     void* vsCode=gpuCompile(compile,"vs","vs_4_0");void* psCode=gpuCompile(compile,"ps","ps_4_0");
@@ -1114,7 +1114,7 @@ static int gpuDuplicate(void){
     if(COM(g_gpuOutput,22,LONG,(void*,void*,void**))(g_gpuOutput,g_gpuDev,&g_gpuDup)<0){g_gpuDup=0;return 0;}
     DXDUPDESC_ d;d.Format=0;d.Rotation=0;d.InSysMem=1;d.W=d.H=0;
     COM(g_gpuDup,7,void,(void*,DXDUPDESC_*))(g_gpuDup,&d);
-    if(d.Format!=DXGI_FMT_BGRA||d.InSysMem||(d.Rotation!=0&&d.Rotation!=1)||d.W<2||d.H<2){gpuDropDuplication();return 0;}
+    if(d.Format!=DXGI_FMT_BGRA||(d.Rotation!=0&&d.Rotation!=1)||d.W<2||d.H<2){gpuDropDuplication();return 0;}
     g_gpuW=(int)d.W;g_gpuH=(int)d.H;
     g_gpuClean=gpuTexture(d.W,d.H,0x8,0);
     g_gpuWork=gpuTexture(d.W,d.H,0x8|0x20,0x200); /* shader resource + render target, GDI compatible */
@@ -1151,6 +1151,8 @@ static int gpuPlace(int dx,int dy,int dw,int dh){
         g_gpuSwapW=dw;g_gpuSwapH=dh;
     }else if(dw!=g_gpuSwapW||dh!=g_gpuSwapH){
         COMREL(g_gpuRtv);
+        COM(g_gpuCtx,33,void,(void*,UINT,void* const*,void*))(g_gpuCtx,0,0,0); /* ResizeBuffers needs it unbound */
+        COM(g_gpuCtx,111,void,(void*))(g_gpuCtx);
         if(COM(g_gpuSwap,13,LONG,(void*,UINT,UINT,UINT,UINT,UINT))(g_gpuSwap,0,(UINT)dw,(UINT)dh,0,0)<0)return 0;
         g_gpuSwapW=dw;g_gpuSwapH=dh;
     }
@@ -1172,13 +1174,16 @@ static int gpuPlace(int dx,int dy,int dw,int dh){
 static int gpuTakeFrame(void){
     DXFRAMEINFO_ fi;void* res=0;
     LONG hr=COM(g_gpuDup,8,LONG,(void*,UINT,DXFRAMEINFO_*,void**))(g_gpuDup,g_gpuHasFrame?0:100,&fi,&res);
-    if(hr==DXGI_ERR_WAIT_TIMEOUT)return g_gpuHasFrame;
-    if(hr<0){gpuDropDuplication();return 0;}
+    if(hr==DXGI_ERR_WAIT_TIMEOUT){
+        if(!g_gpuHasFrame)g_gpuNoFrame++; /* each try waited 100 ms on the UI thread */
+        return g_gpuHasFrame?1:0;
+    }
+    if(hr<0)return -1; /* access lost: mode change, lock screen, UAC */
     void* tex=0;
     if(fi.LastPresent!=0||!g_gpuHasFrame){
         if(COM(res,0,LONG,(void*,const void*,void**))(res,&IID_ID3D11Texture2D_,&tex)>=0&&tex){
             COM(g_gpuCtx,47,void,(void*,void*,void*))(g_gpuCtx,g_gpuClean,tex); /* CopyResource */
-            g_gpuHasFrame=1;
+            g_gpuHasFrame=1;g_gpuNoFrame=0;
 #ifdef GPU_STATS
             g_gpuFrames++;
 #endif
@@ -1187,7 +1192,7 @@ static int gpuTakeFrame(void){
     }
     COMREL(res);
     COM(g_gpuDup,14,LONG,(void*))(g_gpuDup); /* ReleaseFrame */
-    return g_gpuHasFrame;
+    return g_gpuHasFrame?1:0;
 }
 static void gpuDrawPointer(int monLeft,int monTop){
     if(!g_showCursor)return;
@@ -1206,22 +1211,31 @@ static void gpuDrawPointer(int monLeft,int monTop){
     DrawIconEx(dc,x-hotX,y-hotY,(HICON)ci.hCursor,0,0,0,0,DI_NORMAL);
     COM(g_gpuWorkSurf,12,LONG,(void*,RECT*))(g_gpuWorkSurf,0);
 }
+static void gpuRetryLater(void){gpuRelease();g_gpuRetryAt=GetTickCount()+1000;}
 /* Draws this frame on the GPU when the picture is a shrunk whole screen; 0 means another path has to. */
 static int gpuRender(void){
-    int want=!g_gpuFailed&&!g_srcWindow&&!g_isBlack&&!g_editFrame&&g_sourceIndex<g_monitorCount;
+    int want=!g_gpuFailed&&!g_srcWindow&&!g_isBlack&&!g_editFrame&&g_sourceIndex<g_monitorCount&&IsWindowVisible(g_output);
     int fx,fy,fw,fh,sx,sy,sw,sh,dx,dy,dw,dh;
     if(want){computeFrame(&fx,&fy,&fw,&fh);pictureRects(fx,fy,fw,fh,&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh);want=dw<sw||dh<sh;}
     if(!want){gpuHide();return 0;}
     if(g_gpuDev&&g_gpuSrc!=g_sourceIndex)gpuRelease();
-    if(!g_gpuDev&&!gpuInit()){gpuRelease();g_gpuFailed=1;return 0;}
-    if(!g_gpuDup){
-        if(g_gpuRetryAt&&(int)(GetTickCount()-g_gpuRetryAt)<0){gpuHide();return 0;}
-        if(!gpuDuplicate()){g_gpuRetryAt=GetTickCount()+500;gpuHide();return 0;}
+    if(g_gpuRetryAt){
+        if((int)(GetTickCount()-g_gpuRetryAt)<0){gpuHide();return 0;}
         g_gpuRetryAt=0;
     }
-    if(!gpuTakeFrame()){gpuHide();return 0;}
+    if(!g_gpuDev&&!gpuInit()){gpuRelease();g_gpuFailed=1;return 0;} /* no GPU path on this machine */
+    /* Anything that can follow a display change is rebuilt from scratch a second later:
+     * the output object itself may be stale after a mode change. */
+    if(!g_gpuDup&&!gpuDuplicate()){gpuRetryLater();return 0;}
+    int got=gpuTakeFrame();
+    if(got<0){gpuRetryLater();return 0;}
+    if(!got){
+        if(g_gpuNoFrame>=10){gpuRelease();g_gpuFailed=1;} /* a second without a first frame: give up */
+        else gpuHide();
+        return 0;
+    }
     RECT m=g_monitors[g_sourceIndex].rcMonitor;
-    if(g_gpuW!=(int)(m.right-m.left)||g_gpuH!=(int)(m.bottom-m.top)){gpuRelease();g_gpuFailed=1;return 0;} /* sizes disagree */
+    if(g_gpuW!=(int)(m.right-m.left)||g_gpuH!=(int)(m.bottom-m.top)){gpuRetryLater();return 0;} /* resolution changing */
     if(!gpuPlace(dx,dy,dw,dh)){gpuRelease();g_gpuFailed=1;return 0;}
     COM(g_gpuCtx,47,void,(void*,void*,void*))(g_gpuCtx,g_gpuWork,g_gpuClean);
     gpuDrawPointer((int)m.left,(int)m.top);
@@ -2849,6 +2863,7 @@ static LRESULT __stdcall mainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
          * so it can never cover the panel, and decide once things have settled. */
         if(g_switching)return 0;
         dismissIds();
+        gpuRelease(); /* its window is not hidden with the output window */
         if(g_output)ShowWindow(g_output,SW_HIDE);
         SetTimer(hwnd,ID_DISPLAY_SETTLE,700,0);
         return 0;

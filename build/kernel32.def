@@ -20,5 +20,5 @@ EXPORTS
  DeleteFileW
  GetCommandLineW
  CreateProcessW
- LoadLibraryW
+ LoadLibraryExW
  GetProcAddress
